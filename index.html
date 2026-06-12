@@ -458,7 +458,7 @@ function render(){
 function renderMonthSel(){
   const sel=document.getElementById("monthSel");
   const ms=monthsAvailable();
-  if(ms.length===0){sel.innerHTML<`<option>${curMonth}</option>`;document.getElementById("monthMeta").textContent="";return;}
+  if(ms.length===0){sel.innerHTML=`<option>${curMonth}</option>`;document.getElementById("monthMeta").textContent="";return;}
   sel.innerHTML=ms.map(m=>{const[y,mo]=m.split("-");
     return `<option value="${m}" ${m===curMonth?"selected":""}>${y}년 ${+mo}월</option>`;}).join("");
   const n=txOfMonth(curMonth).length;
