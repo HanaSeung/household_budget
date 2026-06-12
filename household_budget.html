@@ -150,6 +150,9 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -160,7 +163,8 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
       <span class="sub">월별 가계부 · 농협 거래내역</span>
     </div>
     <div class="tools">
-      <span class="save-dot" id="saveDot"><b></b> 자동 저장됨</span>
+      <button class="btn" id="btnAuth">Google 로그인</button>
+      <span class="save-dot" id="saveDot"><b></b> 이 기기에 저장</span>
       <button class="btn ghost" id="btnImport">불러오기</button>
       <button class="btn ghost" id="btnExport">백업 저장</button>
       <button class="btn ghost" id="btnCsv">CSV 내보내기</button>
@@ -245,6 +249,20 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
 "use strict";
 const KEY="yedam_budget_v1";
 
+/* ---------- Firebase (클라우드 동기화) ---------- */
+const firebaseConfig = {
+  apiKey: "AIzaSyBpeEz3uRDNT9eDqz0FqFw7DOq9X-IWJ5Y",
+  authDomain: "household-budget-2c6aa.firebaseapp.com",
+  databaseURL: "https://household-budget-2c6aa-default-rtdb.firebaseio.com",
+  projectId: "household-budget-2c6aa",
+  storageBucket: "household-budget-2c6aa.firebasestorage.app",
+  messagingSenderId: "356618778776",
+  appId: "1:356618778776:web:f5364e935b7f7e9e57f8ed"
+};
+let fbReady=false, currentUser=null, dbRef=null;
+try{ if(window.firebase){ firebase.initializeApp(firebaseConfig); fbReady=true; } }
+catch(e){ console.warn("firebase init", e); }
+
 /* ---------- 기본 카테고리 & 자동분류 규칙 ---------- */
 const DEFAULT_CATS=["가족용돈","보험","공과금","자녀/교육","교회/사역","식비","교통/주차",
   "경조사/선물","후원/헌금","카드대금","생활/기타","수입"];
@@ -280,7 +298,11 @@ function load(){
 }
 let saveTimer=null;
 function save(){
-  try{localStorage.setItem(KEY,JSON.stringify(state));flashSave();}
+  try{
+    localStorage.setItem(KEY,JSON.stringify(state));
+    if(currentUser&&dbRef){ dbRef.set(state).catch(e=>console.warn("cloud save",e)); }
+    flashSave();
+  }
   catch(e){toast("저장 실패: 브라우저 저장공간을 확인하세요");}
 }
 function queueSave(){clearTimeout(saveTimer);saveTimer=setTimeout(save,400);}
@@ -309,7 +331,7 @@ function autoCategory(text){
 
 /* ---------- 거래내역 파서 ----------
    한 줄에서 날짜 / 입출금구분 / 금액 / 텍스트를 유연하게 추출.
-   농협 보안메일 보호화본, 엑셀 복사본 등 여러 형식 대응. */
+   농협 보안메일 복호화본, 엑셀 복사본 등 여러 형식 대응. */
 function parseTransactions(raw){
   const lines=raw.split(/\r?\n/);
   const out=[]; let skipped=0;
@@ -574,8 +596,60 @@ document.querySelectorAll("#inputSeg button").forEach(b=>b.onclick=()=>{
 });
 
 /* ---------- 시작 ---------- */
+/* ---------- 로그인 / 클라우드 동기화 ---------- */
+function updateAuthUI(){
+  const btn=document.getElementById("btnAuth");
+  const dot=document.getElementById("saveDot");
+  if(!btn||!dot)return;
+  if(currentUser){
+    const nm=currentUser.displayName||currentUser.email||"사용자";
+    btn.textContent=nm+" · 로그아웃";
+    dot.innerHTML='<b></b> 클라우드 동기화됨';
+  }else{
+    btn.textContent="Google 로그인";
+    dot.innerHTML='<b style="background:var(--muted)"></b> 이 기기에 저장';
+  }
+}
+function doLogin(){
+  if(!fbReady){toast("인터넷에 연결된 상태에서 열어주세요");return;}
+  const provider=new firebase.auth.GoogleAuthProvider();
+  firebase.auth().signInWithPopup(provider).catch(e=>{
+    console.warn(e);
+    toast("로그인 실패: "+(e.code||e.message||""));
+  });
+}
+function doLogout(){ if(fbReady) firebase.auth().signOut(); }
+document.getElementById("btnAuth").onclick=()=>{ currentUser?doLogout():doLogin(); };
+
+if(fbReady){
+  firebase.auth().onAuthStateChanged(user=>{
+    currentUser=user;
+    if(user){
+      dbRef=firebase.database().ref("users/"+user.uid);
+      dbRef.once("value").then(snap=>{
+        const cloud=snap.val();
+        let txs = cloud && cloud.transactions;
+        if(txs && !Array.isArray(txs)) txs=Object.values(txs);
+        if(txs && txs.length){
+          state.transactions=txs;
+          state.rules={...SEED_RULES,...((cloud&&cloud.rules)||{})};
+          state.catColors=(cloud&&cloud.catColors)||{};
+          toast("클라우드에서 불러왔습니다");
+        }else{
+          dbRef.set(state).catch(e=>console.warn("first upload",e));
+          toast("이 기기 데이터를 클라우드에 올렸습니다");
+        }
+        curMonth=null; assignColors(); render(); updateAuthUI();
+      }).catch(e=>{ console.warn(e); updateAuthUI(); toast("동기화 오류: "+(e.code||"")); });
+    }else{
+      dbRef=null; updateAuthUI();
+    }
+  });
+}
+
 load();
 render();
+updateAuthUI();
 </script>
 </body>
 </html>
