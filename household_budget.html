@@ -355,16 +355,18 @@ function parseTransactions(raw){
   const isHyundai=/^승인일	/.test(header)&&/승인금액/.test(header);
   // 농협 엑셀: 헤더에 "거래일자" + "출금액"
   const isNhExcel=/거래일자/.test(header)&&/출금액/.test(header);
-  const isCardOrNhExcel=isSamsung||isHyundai||isNhExcel;
+  // 현대카드(이용내역형): 헤더에 "이용일" + "이용금액"
+  const isHyundai2=/이용일/.test(header)&&/이용금액/.test(header);
+  const isCardOrNhExcel=isSamsung||isHyundai||isHyundai2||isNhExcel;
 
   /* ── 탭 구분 형식 (카드/농협엑셀) 파서 ── */
   if(isCardOrNhExcel){
     const out=[]; let skipped=0;
     // 헤더에서 컬럼 인덱스 파악
     const cols=header.split(/\t/);
-    const iDate=cols.findIndex(c=>/승인일|거래일자/.test(c));
-    const iName=cols.findIndex(c=>/가맹점명|거래기록사항|적요/.test(c));
-    const iAmt=cols.findIndex(c=>/승인금액|출금액/.test(c));
+    const iDate=cols.findIndex(c=>/승인일|거래일자|이용일/.test(c));
+    const iName=cols.findIndex(c=>/가맹점명|이용가맹점|거래기록사항|적요/.test(c));
+    const iAmt=cols.findIndex(c=>/승인금액|이용금액|출금액/.test(c));
     for(let i=1;i<lines.length;i++){
       const cells=lines[i].split(/\t/);
       if(cells.length<2) continue;
