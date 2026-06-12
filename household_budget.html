@@ -368,24 +368,29 @@ function parseTransactions(raw){
     const iName=cols.findIndex(c=>/가맹점명|이용가맹점|거래기록사항|적요/.test(c));
     const iAmt=cols.findIndex(c=>/승인금액|이용금액|출금액/.test(c));
     for(let i=1;i<lines.length;i++){
-      const cells=lines[i].split(/\t/);
-      if(cells.length<2) continue;
-      // 날짜 파싱
-      const rawDate=(cells[iDate]||"").trim();
-      // 2026.06.10 / 2026-06-10 / 2026년 06월 10일
-      let dm=rawDate.match(/(20\d{2})[.\-\/](0[1-9]|1[0-2])[.\-\/](0[1-9]|[12]\d|3[01])/);
-      if(!dm) dm=rawDate.match(/(20\d{2})년\s*(0[1-9]|1[0-2])월\s*(0[1-9]|[12]\d|3[01])일/);
+      const line=lines[i];
+      const cells=line.split(/\t/);
+      let rawDate,rawAmt,desc;
+      if(cells.length>=2){
+        rawDate=(cells[iDate]||"").trim();
+        rawAmt=iAmt>=0?(cells[iAmt]||""):(cells[cells.length-1]||"");
+        desc=iName>=0?(cells[iName]||"").trim().slice(0,40):"(내용없음)";
+      }else{
+        // 탭이 사라진 경우: 줄 앞 날짜 + 가운데 가맹점명 + 줄 끝 금액
+        const mx=line.match(/^\s*(20\d{2}[년.\-\/]\s*\d{1,2}[월.\-\/]\s*\d{1,2}일?)\s+(.*?)\s+([\d,]{3,})\s*원?\s*$/);
+        if(!mx){ skipped++; continue; }
+        rawDate=mx[1]; desc=mx[2].trim().slice(0,40)||"(내용없음)"; rawAmt=mx[3];
+      }
+      // 날짜 파싱: 2026.06.10 / 2026-06-10 / 2026년 6월 10일
+      let dm=rawDate.match(/(20\d{2})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/);
+      if(!dm) dm=rawDate.match(/(20\d{2})년\s*(\d{1,2})월\s*(\d{1,2})일/);
       if(!dm){ skipped++; continue; }
-      const date=`${dm[1]}-${dm[2]}-${dm[3]}`;
+      const date=`${dm[1]}-${String(+dm[2]).padStart(2,"0")}-${String(+dm[3]).padStart(2,"0")}`;
       // 금액
-      const rawAmt=iAmt>=0?(cells[iAmt]||""):(cells[cells.length-1]||"");
-      const amount=+rawAmt.replace(/[^0-9]/g,"");
+      const amount=+String(rawAmt).replace(/[^0-9]/g,"");
       if(!amount){ skipped++; continue; }
-      // 가맹점명
-      const desc=iName>=0?(cells[iName]||"").trim().slice(0,40):"(내용없음)";
-      const origLine=lines[i];
       out.push({id:uid(),date,type:"expense",amount,desc,memo:"",
-        category:autoCategory(desc||origLine)});
+        category:autoCategory(desc||line)});
     }
     return {out,skipped};
   }
