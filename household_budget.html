@@ -341,18 +341,60 @@ function autoCategory(text){
 }
 
 /* ---------- 거래내역 파서 ----------
-   한 줄에서 날짜 / 입출금구분 / 금액 / 텍스트를 유연하게 추출.
-   농협 보안메일 복호화본, 엑셀 복사본 등 여러 형식 대응. */
+   날짜 / 입출금구분 / 금액 / 텍스트를 유연하게 추출.
+   농협 보안메일 · 농협 엑셀 · 삼성카드 · 현대카드 형식 자동 감지. */
 function parseTransactions(raw){
-  const lines=raw.split(/\r?\n/);
+  const lines=raw.split(/\r?\n/).map(l=>l.replace(/\u3000/g," ").trim()).filter(l=>l);
+  if(!lines.length) return {out:[],skipped:0};
+
+  /* ── 형식 자동 감지 ── */
+  const header=lines[0];
+  // 삼성카드: 헤더에 "승인일자" + "승인금액(원)"
+  const isSamsung=/승인일자/.test(header)&&/승인금액/.test(header);
+  // 현대카드: 헤더에 "승인일" + "승인금액" (승인일자 아님)
+  const isHyundai=/^승인일	/.test(header)&&/승인금액/.test(header);
+  // 농협 엑셀: 헤더에 "거래일자" + "출금액"
+  const isNhExcel=/거래일자/.test(header)&&/출금액/.test(header);
+  const isCardOrNhExcel=isSamsung||isHyundai||isNhExcel;
+
+  /* ── 탭 구분 형식 (카드/농협엑셀) 파서 ── */
+  if(isCardOrNhExcel){
+    const out=[]; let skipped=0;
+    // 헤더에서 컬럼 인덱스 파악
+    const cols=header.split(/\t/);
+    const iDate=cols.findIndex(c=>/승인일|거래일자/.test(c));
+    const iName=cols.findIndex(c=>/가맹점명|거래기록사항|적요/.test(c));
+    const iAmt=cols.findIndex(c=>/승인금액|출금액/.test(c));
+    for(let i=1;i<lines.length;i++){
+      const cells=lines[i].split(/\t/);
+      if(cells.length<2) continue;
+      // 날짜 파싱
+      const rawDate=(cells[iDate]||"").trim();
+      // 2026.06.10 / 2026-06-10 / 2026년 06월 10일
+      let dm=rawDate.match(/(20\d{2})[.\-\/](0[1-9]|1[0-2])[.\-\/](0[1-9]|[12]\d|3[01])/);
+      if(!dm) dm=rawDate.match(/(20\d{2})년\s*(0[1-9]|1[0-2])월\s*(0[1-9]|[12]\d|3[01])일/);
+      if(!dm){ skipped++; continue; }
+      const date=`${dm[1]}-${dm[2]}-${dm[3]}`;
+      // 금액
+      const rawAmt=iAmt>=0?(cells[iAmt]||""):(cells[cells.length-1]||"");
+      const amount=+rawAmt.replace(/[^0-9]/g,"");
+      if(!amount){ skipped++; continue; }
+      // 가맹점명
+      const desc=iName>=0?(cells[iName]||"").trim().slice(0,40):"(내용없음)";
+      const origLine=lines[i];
+      out.push({id:uid(),date,type:"expense",amount,desc,memo:"",
+        category:autoCategory(desc||origLine)});
+    }
+    return {out,skipped};
+  }
+
+  /* ── 기존 농협 보안메일 파서 ── */
   const out=[]; let skipped=0;
   for(let line of lines){
     const orig=line;
-    line=line.replace(/\u3000/g," ").trim();
-    if(!line) continue;
-    // 시:분:초 먼저 제거(날짜 숫자와 붙어있을 수 있어 우선 처리)
+    // 시:분:초 먼저 제거
     let work=line.replace(/(\d{1,2}):(\d{2})(:(\d{2}))?/g," ");
-    // 날짜: 구분자 있는 형태 우선, 없으면 8자리 연속
+    // 날짜
     let dm=work.match(/(20\d{2})[-.\/](0[1-9]|1[0-2])[-.\/](0[1-9]|[12]\d|3[01])/);
     if(!dm) dm=work.match(/(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])/);
     if(!dm){ skipped++; continue; }
@@ -362,7 +404,7 @@ function parseTransactions(raw){
     let type=null;
     if(/출금|지출|인출/.test(rest)){type="expense";rest=rest.replace(/출금|지출|인출/g," ");}
     else if(/입금|수입/.test(rest)){type="income";rest=rest.replace(/입금|수입/g," ");}
-    // 금액 후보 (원 표기 우선, 없으면 콤마/3자리 숫자)
+    // 금액
     let amts=[];
     let m, re=/([0-9][0-9,]*)\s*원/g;
     while((m=re.exec(rest))) amts.push({v:+m[1].replace(/,/g,""),i:m.index,len:m[0].length,won:true});
@@ -371,20 +413,17 @@ function parseTransactions(raw){
       while((m=re.exec(rest))){const s=m[1];amts.push({v:+s.replace(/,/g,""),i:m.index,len:m[0].length,won:false});}
     }
     if(amts.length===0){ skipped++; continue; }
-    // 거래금액 = 첫 금액, (그 외는 잔액 등으로 간주)
     const amount=amts[0].v;
-    // 금액 토큰 제거 후 남는 텍스트
     let txt=rest;
     amts.forEach(a=>{txt=txt.replace(a.won?`${a.v.toLocaleString()}원`:"","");});
     txt=txt.replace(/[0-9][0-9,]*\s*원/g," ").replace(/\b\d{3,}\b/g," ");
-    // 거래점/은행 코드 정리
     txt=txt.replace(/NH[가-힣A-Za-z]*은행\d*/g," ").replace(/NH투자증권\d*/g," ")
            .replace(/[A-Za-z]*제일\d*/g," ").replace(/ATM\([^)]*\)/g," ")
            .replace(/CD현금|타기관오픈|자동이체|자동납부|스마트당행|스쿨뱅킹|보험료|전기료|통신료|PC-|E-NH증권/g," ");
     txt=txt.replace(/[:;|]/g," ");
     const words=txt.split(/\s+/).map(w=>w.trim()).filter(w=>w.length>0&&!/^[\d,]+$/.test(w));
     const desc=words.join(" ").slice(0,40)||"(내용없음)";
-    if(type===null) type = amount>=1000000 ? "income" : "expense"; // 큰 금액 추정 보정
+    if(type===null) type = amount>=1000000 ? "income" : "expense";
     out.push({id:uid(),date,type,amount,desc,memo:"",
       category:type==="income"?"수입":autoCategory(orig)});
   }
@@ -419,7 +458,7 @@ function render(){
 function renderMonthSel(){
   const sel=document.getElementById("monthSel");
   const ms=monthsAvailable();
-  if(ms.length===0){sel.innerHTML=`<option>${curMonth}</option>`;document.getElementById("monthMeta").textContent="";return;}
+  if(ms.length===0){sel.innerHTML<`<option>${curMonth}</option>`;document.getElementById("monthMeta").textContent="";return;}
   sel.innerHTML=ms.map(m=>{const[y,mo]=m.split("-");
     return `<option value="${m}" ${m===curMonth?"selected":""}>${y}년 ${+mo}월</option>`;}).join("");
   const n=txOfMonth(curMonth).length;
@@ -506,7 +545,6 @@ function changeCat(id,cat){
   const t=state.transactions.find(x=>x.id===id);
   if(!t)return;
   t.category=cat;
-  // 규칙 학습: 거래내용의 핵심 단어를 규칙으로 기억(수입 제외)
   if(t.type==="expense"&&t.desc&&t.desc!=="(내용없음)"){
     const kw=t.desc.split(/\s+/)[0];
     if(kw&&kw.length>=2){state.rules[kw]=cat;}
@@ -522,7 +560,6 @@ function addParsed(){
   const ta=document.getElementById("paste");
   const {out,skipped}=parseTransactions(ta.value);
   if(out.length===0){toast("인식된 거래가 없습니다. 형식을 확인하세요");return;}
-  // 중복 제거(같은 날짜+금액+내용)
   let added=0;
   out.forEach(n=>{
     const dup=state.transactions.some(t=>t.date===n.date&&t.amount===n.amount&&t.desc===n.desc&&t.type===n.type);
@@ -549,7 +586,6 @@ function addManual(){
   queueSave();render();toast("추가했습니다");
 }
 
-/* ---------- 백업 / 불러오기 / CSV ---------- */
 function exportJSON(){
   const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
   download(blob,`가계부백업_${new Date().toISOString().slice(0,10)}.json`);
@@ -585,7 +621,6 @@ let toastTimer=null;
 function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");
   clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove("show"),2600);}
 
-/* ---------- 이벤트 바인딩 ---------- */
 document.getElementById("btnParse").onclick=addParsed;
 document.getElementById("btnClearPaste").onclick=()=>{document.getElementById("paste").value="";};
 document.getElementById("btnAddManual").onclick=addManual;
