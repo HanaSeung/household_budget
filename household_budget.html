@@ -220,8 +220,17 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
 .tbar{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0}
 .tbar .stack{width:100%;max-width:42px;display:flex;flex-direction:column-reverse;justify-content:flex-start;
   height:90px;position:relative}
-.tbar .seg-out{background:var(--expense);border-radius:5px 5px 0 0;min-height:3px}
-.tbar:not(.active) .seg-out{opacity:.45}
+.tbar .tseg{width:100%;display:flex;align-items:center;justify-content:center;min-height:2px}
+.tbar .seg-top{border-radius:5px 5px 0 0}
+.tbar .seg-bank{background:#1D9E75}
+.tbar .seg-sam{background:#378ADD}
+.tbar .seg-hyu{background:#D85A30}
+.tbar .seg-etc{background:#9A9A93}
+.tbar .segpct{font-size:11px;font-weight:600;color:#fff;font-variant-numeric:tabular-nums;line-height:1}
+.tbar:not(.active) .tseg{opacity:.45}
+.tlegend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--muted);font-weight:600;margin:-2px 0 10px}
+.tlegend span{display:flex;align-items:center;gap:4px}
+.tlegend .dot{width:9px;height:9px;border-radius:2px;display:inline-block}
 .tbar .tlab{font-size:11px;color:var(--muted);font-weight:600;white-space:nowrap}
 .tbar.active .tlab{color:var(--ink);font-weight:700}
 .tbar .tamt{position:absolute;left:50%;transform:translateX(-50%);font-size:11.5px;color:var(--muted);font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -351,6 +360,12 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
     <!-- 월별 추이 -->
     <section class="card">
       <h2>월별 지출 추이</h2>
+      <div class="tlegend">
+        <span><i class="dot" style="background:#1D9E75"></i>통장</span>
+        <span><i class="dot" style="background:#378ADD"></i>삼성</span>
+        <span><i class="dot" style="background:#D85A30"></i>현대</span>
+        <span><i class="dot" style="background:#9A9A93"></i>기타</span>
+      </div>
       <div class="trend" id="trend"></div>
     </section>
   </div>
@@ -797,15 +812,37 @@ function renderTrend(){
   const box=document.getElementById("trend");
   const ms=monthsAvailable().slice(0,6).reverse();
   if(ms.length===0){box.innerHTML='<div class="empty" style="width:100%">데이터가 쌓이면 추이가 표시됩니다.</div>';return;}
-  const sums=ms.map(m=>txOfMonth(m).filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0));
-  const max=Math.max(...sums,1);
+  const SEGDEF=[
+    {key:"농협통장",cls:"seg-bank",lab:"농협통장"},
+    {key:"삼성카드",cls:"seg-sam",lab:"삼성카드"},
+    {key:"현대카드",cls:"seg-hyu",lab:"현대카드"}
+  ];
+  const keys=SEGDEF.map(s=>s.key);
+  const rows=ms.map(m=>{
+    const ex=txOfMonth(m).filter(t=>t.type==="expense");
+    const by={};keys.forEach(k=>by[k]=0);let etc=0,total=0;
+    ex.forEach(t=>{total+=t.amount;const s=t.source||"";
+      if(keys.includes(s))by[s]+=t.amount;else etc+=t.amount;});
+    return {m,by,etc,total};
+  });
+  const max=Math.max(...rows.map(r=>r.total),1);
   const fmtMan=v=>v>=10000?Math.round(v/10000).toLocaleString("ko-KR")+"만":won(v);
-  box.innerHTML=ms.map((m,i)=>{
-    const h=Math.round(sums[i]/max*90);
-    const[,mo]=m.split("-");
-    return `<div class="tbar ${m===curMonth?'active':''}" data-m="${m}" title="${won(sums[i])}원">
-      <div class="stack"><div class="seg-out" style="height:${h}px"></div>
-        <div class="tamt" style="bottom:${h+4}px">${fmtMan(sums[i])}</div></div>
+  const pxOf=v=>v<=0?0:Math.max(2,Math.round(v/max*90));
+  box.innerHTML=rows.map(r=>{
+    const segs=[...SEGDEF.map(s=>({cls:s.cls,lab:s.lab,val:r.by[s.key]})),
+                {cls:"seg-etc",lab:"기타",val:r.etc}].filter(s=>s.val>0);
+    let stackH=0;
+    const segHTML=segs.map((s,idx)=>{
+      const h=pxOf(s.val);stackH+=h;
+      const pct=r.total>0?Math.round(s.val/r.total*100):0;
+      const top=idx===segs.length-1?" seg-top":"";
+      const pctTxt=h>=14?`<span class="segpct">${pct}%</span>`:"";
+      return `<div class="tseg ${s.cls}${top}" style="height:${h}px" title="${s.lab}: ${fmtMan(s.val)}">${pctTxt}</div>`;
+    }).join("");
+    const[,mo]=r.m.split("-");
+    return `<div class="tbar ${r.m===curMonth?'active':''}" data-m="${r.m}" title="합계 ${won(r.total)}원">
+      <div class="stack">${segHTML}
+        <div class="tamt" style="bottom:${stackH+4}px">${fmtMan(r.total)}</div></div>
       <div class="tlab">${+mo}월</div></div>`;
   }).join("");
   box.querySelectorAll(".tbar").forEach(b=>b.onclick=()=>{curMonth=b.dataset.m;render();});
