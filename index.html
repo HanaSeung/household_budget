@@ -95,6 +95,23 @@ textarea#paste:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px 
   border-radius:7px;padding:3px 8px;cursor:pointer;font-size:14px;line-height:1}
 .edit:hover{border-color:var(--teal);background:#fff}
 
+/* category manager (settings tab) */
+.catmrow{display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line-soft)}
+.catmrow:last-child{border-bottom:0}
+.cmdot{width:11px;height:11px;border-radius:50%;flex:none}
+.cmname{font-weight:600;color:var(--ink);font-size:14px}
+.cmlock{font-size:10.5px;color:var(--muted);background:var(--line-soft);border-radius:5px;
+  padding:1px 6px;margin-left:7px;font-weight:600}
+.cmmeta{font-size:12px;color:var(--muted);margin-left:auto;white-space:nowrap}
+.cmacts{display:flex;gap:4px;flex:none}
+.cmbtn{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--teal);
+  border-radius:7px;width:30px;height:28px;cursor:pointer;font-size:12px;line-height:1;
+  display:inline-flex;align-items:center;justify-content:center;transition:.12s}
+.cmbtn:hover:not(:disabled){border-color:var(--teal);background:#fff}
+.cmbtn:disabled{opacity:.3;cursor:default}
+.cmbtn.danger{color:var(--expense)}
+.cmbtn.danger:hover:not(:disabled){background:var(--expense);color:#fff;border-color:var(--expense)}
+
 /* month bar */
 .monthbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
 .mselect{display:inline-flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);
@@ -233,6 +250,7 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
     <button class="on" data-tab="summary">요약</button>
     <button data-tab="tx">거래내역</button>
     <button data-tab="input">입력</button>
+    <button data-tab="settings">설정</button>
   </div>
 
   <!-- 월 선택 (공통) -->
@@ -323,6 +341,24 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
     </section>
   </div>
 
+  <!-- 설정 탭 -->
+  <div id="tabSettings" style="display:none">
+    <section class="card">
+      <div class="txhead">
+        <h2>카테고리 관리 <span class="tag">추가 · 수정 · 순서 · 삭제</span></h2>
+        <div style="display:flex;gap:8px">
+          <button class="btn" id="btnAddCat">+ 카테고리 추가</button>
+          <button class="btn danger" id="btnResetCats">초기화</button>
+        </div>
+      </div>
+      <div class="hint" style="margin-bottom:12px">
+        자동분류 규칙은 거래가 <b>새로 입력될 때</b> 적용됩니다. ‘수입’·‘기타’는 기본 카테고리라 이름변경·삭제가 제한됩니다.
+        삭제하면 해당 거래는 ‘기타’로 옮겨지고 관련 자동분류 규칙도 함께 삭제됩니다.
+      </div>
+      <div id="catManager"></div>
+    </section>
+  </div>
+
 </div>
 <div class="modal-ov" id="editOv">
   <div class="modal">
@@ -367,16 +403,20 @@ catch(e){ console.warn("firebase init", e); }
 function encKey(k){ return String(k).replace(/[.#$/\[\]]/g, c=>"~"+c.charCodeAt(0)+"~"); }
 function decKey(k){ return String(k).replace(/~(\d+)~/g, (_,n)=>String.fromCharCode(+n)); }
 function mapKeys(obj,fn){ const o={}; for(const k in obj){ o[fn(k)]=obj[k]; } return o; }
-function cloudSafe(st){ return { title: st.title||"", transactions: st.transactions||[], rules: mapKeys(st.rules||{},encKey), catColors: mapKeys(st.catColors||{},encKey) }; }
+function cloudSafe(st){ return { title: st.title||"", transactions: st.transactions||[], rules: mapKeys(st.rules||{},encKey), catColors: mapKeys(st.catColors||{},encKey), cats: st.cats||[] }; }
 function cloudRestore(cl){
   let txs = cl && cl.transactions;
   if(txs && !Array.isArray(txs)) txs = Object.values(txs);
-  return { title: (cl&&cl.title)||"", transactions: txs||[], rules: mapKeys((cl&&cl.rules)||{},decKey), catColors: mapKeys((cl&&cl.catColors)||{},decKey) };
+  let cats = cl && cl.cats;
+  if(cats && !Array.isArray(cats)) cats = Object.values(cats);
+  return { title: (cl&&cl.title)||"", transactions: txs||[], rules: mapKeys((cl&&cl.rules)||{},decKey), catColors: mapKeys((cl&&cl.catColors)||{},decKey), cats: cats||[] };
 }
 
 /* ---------- 기본 카테고리 & 자동분류 규칙 ---------- */
-const DEFAULT_CATS=["가족용돈","보험","공과금","자녀/교육","교회/사역","식비","교통/주차",
-  "경조사/선물","후원/헌금","카드대금","생활/기타","수입"];
+const DEFAULT_CATS=["식비","외식","의료/건강","교통/주차","차량유지비","공과금","보험",
+  "자녀/교육","가족용돈","교회/사역","후원/헌금","경조사/선물","카드대금","수입","기타"];
+// 삭제·이름변경 보호 카테고리 (시스템이 의존)
+const PROTECTED_CATS=["수입","기타"];
 // 키워드(거래기록사항/내용에 포함) → 카테고리
 const SEED_RULES={
   "용돈":"가족용돈",
@@ -384,8 +424,11 @@ const SEED_RULES={
   "전기":"공과금","요금":"공과금","통신":"공과금","KT":"공과금","수도":"공과금","가스":"공과금","관리비":"공과금",
   "석식":"자녀/교육","스쿨뱅킹":"자녀/교육","학원":"자녀/교육","등록금":"자녀/교육","고6":"자녀/교육",
   "수련회":"교회/사역","CCC":"교회/사역","ＣＣＣ":"교회/사역","전도":"교회/사역","교회":"교회/사역",
-  "식비":"식비","간식":"식비","감자":"식비","계란":"식비","커피":"식비","음료":"식비","마트":"식비",
-  "주차":"교통/주차","주유":"교통/주차","버스":"교통/주차","택시":"교통/주차","교통":"교통/주차","톨게이트":"교통/주차",
+  "식비":"식비","간식":"식비","감자":"식비","계란":"식비","커피":"식비","음료":"식비","마트":"식비","베스트대성":"식비","청과":"식비",
+  "스시":"외식","돼지국밥":"외식","명성가":"외식",
+  "의원":"의료/건강","약국":"의료/건강","병원":"의료/건강","한의원":"의료/건강","의료":"의료/건강",
+  "주유":"차량유지비","정비":"차량유지비","카센터":"차량유지비","타이어":"차량유지비","엔진오일":"차량유지비",
+  "주차":"교통/주차","버스":"교통/주차","택시":"교통/주차","교통":"교통/주차","톨게이트":"교통/주차","도로공사":"교통/주차","파킹":"교통/주차",
   "선물":"경조사/선물","축의":"경조사/선물","부의":"경조사/선물","경조":"경조사/선물",
   "헌금":"후원/헌금","오엠에프":"후원/헌금","신학대학원":"후원/헌금","후원":"후원/헌금","선교":"후원/헌금",
   "카드":"카드대금","현대카드":"카드대금","삼성카드":"카드대금",
@@ -397,7 +440,7 @@ const PALETTE=["#386f72","#b4502a","#b08642","#1f7a4d","#6b5b95","#3b7a9e",
 
 /* ---------- 상태 ---------- */
 const DEFAULT_TITLE="예닮 살림장부";
-let state={title:DEFAULT_TITLE,transactions:[],rules:{...SEED_RULES},catColors:{}};
+let state={title:DEFAULT_TITLE,transactions:[],rules:{...SEED_RULES},catColors:{},cats:[...DEFAULT_CATS]};
 function load(){
   try{const r=localStorage.getItem(KEY);
     if(r){const d=JSON.parse(r);
@@ -405,8 +448,10 @@ function load(){
       state.transactions=d.transactions||[];
       state.rules={...SEED_RULES,...(d.rules||{})};
       state.catColors=d.catColors||{};
+      state.cats=Array.isArray(d.cats)&&d.cats.length?d.cats.slice():[...DEFAULT_CATS];
     }
   }catch(e){console.warn("load fail",e);}
+  normalizeCats();
   assignColors();applyTitle();
 }
 let saveTimer=null;
@@ -422,12 +467,31 @@ function queueSave(){clearTimeout(saveTimer);saveTimer=setTimeout(save,400);}
 function flashSave(){const d=document.getElementById("saveDot");
   d.style.opacity=".4";setTimeout(()=>d.style.opacity="1",150);}
 
-function allCats(){
-  const s=new Set(DEFAULT_CATS);
-  Object.values(state.rules).forEach(c=>s.add(c));
-  state.transactions.forEach(t=>t.category&&s.add(t.category));
-  return [...s];
+/* 카테고리 목록 정규화 + 구버전 이전('생활/기타' → '기타') */
+function normalizeCats(){
+  const OLD="생활/기타", NEW="기타";
+  // 1) 이름 일괄 치환
+  if(Array.isArray(state.cats)) state.cats=state.cats.map(c=>c===OLD?NEW:c);
+  state.transactions.forEach(t=>{ if(t.category===OLD) t.category=NEW; });
+  for(const k in state.rules){ if(state.rules[k]===OLD) state.rules[k]=NEW; }
+  if(state.catColors&&state.catColors[OLD]!==undefined){
+    if(state.catColors[NEW]===undefined) state.catColors[NEW]=state.catColors[OLD];
+    delete state.catColors[OLD];
+  }
+  // 2) 유효한 배열 보장
+  if(!Array.isArray(state.cats)||state.cats.length===0) state.cats=[...DEFAULT_CATS];
+  // 3) 중복 제거
+  state.cats=state.cats.filter((c,i)=>state.cats.indexOf(c)===i);
+  // 4) 보호 카테고리 존재 보장
+  PROTECTED_CATS.forEach(p=>{ if(!state.cats.includes(p)) state.cats.push(p); });
+  // 5) 거래/규칙에서 쓰이지만 목록에 없는 카테고리 보충 (유실 방지)
+  const used=new Set();
+  state.transactions.forEach(t=>t.category&&used.add(t.category));
+  Object.values(state.rules).forEach(v=>used.add(v));
+  used.forEach(c=>{ if(!state.cats.includes(c)) state.cats.push(c); });
 }
+function allCats(){ return state.cats.slice(); }
+function catProtected(c){ return PROTECTED_CATS.includes(c); }
 function assignColors(){
   let i=0;allCats().forEach(c=>{if(!state.catColors[c])state.catColors[c]=PALETTE[i%PALETTE.length];i++;});
 }
@@ -437,9 +501,9 @@ function colorOf(c){return state.catColors[c]||"#999";}
 const won=n=>Math.round(n).toLocaleString("ko-KR");
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 function autoCategory(text){
-  if(!text)return "생활/기타";
+  if(!text)return "기타";
   for(const kw in state.rules){ if(text.indexOf(kw)>=0) return state.rules[kw]; }
-  return "생활/기타";
+  return "기타";
 }
 
 /* ---------- 거래내역 파서 ----------
@@ -582,6 +646,7 @@ function render(){
   renderSrcBar();
   renderTable();
   renderManualCats();
+  renderCatManager();
 }
 function renderMonthSel(){
   const sel=document.getElementById("monthSel");
@@ -710,6 +775,92 @@ function renderManualCats(){
 }
 function esc(s){return (s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 
+/* ---------- 카테고리 관리 (설정 탭) ---------- */
+function renderCatManager(){
+  const box=document.getElementById("catManager");
+  if(!box)return;
+  box.innerHTML=state.cats.map((c,i)=>{
+    const col=colorOf(c);
+    const prot=catProtected(c);
+    const ruleCnt=Object.values(state.rules).filter(v=>v===c).length;
+    const txCnt=state.transactions.filter(t=>t.category===c).length;
+    return `<div class="catmrow">
+      <span class="cmdot" style="background:${col}"></span>
+      <span class="cmname">${esc(c)}${prot?'<span class="cmlock">기본</span>':''}</span>
+      <span class="cmmeta">규칙 ${ruleCnt} · 거래 ${txCnt}</span>
+      <span class="cmacts">
+        <button class="cmbtn" data-act="up" data-c="${esc(c)}" ${i===0?'disabled':''} title="위로">▲</button>
+        <button class="cmbtn" data-act="down" data-c="${esc(c)}" ${i===state.cats.length-1?'disabled':''} title="아래로">▼</button>
+        <button class="cmbtn" data-act="rename" data-c="${esc(c)}" ${prot?'disabled':''} title="이름 변경">✎</button>
+        <button class="cmbtn danger" data-act="del" data-c="${esc(c)}" ${prot?'disabled':''} title="삭제">×</button>
+      </span>
+    </div>`;
+  }).join("");
+  box.querySelectorAll(".cmbtn").forEach(b=>b.onclick=()=>{
+    const c=b.dataset.c, act=b.dataset.act;
+    if(act==="up") moveCat(c,-1);
+    else if(act==="down") moveCat(c,1);
+    else if(act==="rename") renameCat(c);
+    else if(act==="del") deleteCat(c);
+  });
+}
+function addCat(){
+  const v=prompt("새 카테고리 이름");
+  if(v===null)return;
+  const name=v.trim();
+  if(!name){toast("이름을 입력하세요");return;}
+  if(state.cats.includes(name)){toast("이미 있는 카테고리입니다");return;}
+  const gi=state.cats.indexOf("기타");
+  if(gi>=0) state.cats.splice(gi,0,name); else state.cats.push(name);
+  assignColors();queueSave();renderCatManager();render();
+  toast(`'${name}' 추가됨`);
+}
+function renameCat(oldName){
+  if(catProtected(oldName)){toast("기본 카테고리는 이름을 바꿀 수 없습니다");return;}
+  const v=prompt("카테고리 이름 변경",oldName);
+  if(v===null)return;
+  const name=v.trim();
+  if(!name){toast("이름을 입력하세요");return;}
+  if(name===oldName)return;
+  if(state.cats.includes(name)){toast("이미 있는 카테고리입니다");return;}
+  const i=state.cats.indexOf(oldName); if(i>=0) state.cats[i]=name;
+  state.transactions.forEach(t=>{if(t.category===oldName)t.category=name;});
+  for(const k in state.rules){if(state.rules[k]===oldName)state.rules[k]=name;}
+  if(state.catColors[oldName]!==undefined){state.catColors[name]=state.catColors[oldName];delete state.catColors[oldName];}
+  assignColors();queueSave();renderCatManager();render();
+  toast(`'${name}'(으)로 변경됨`);
+}
+function deleteCat(name){
+  if(catProtected(name)){toast("기본 카테고리는 삭제할 수 없습니다");return;}
+  if(!confirm(`'${name}' 카테고리를 삭제할까요?\n이 카테고리의 거래는 '기타'로 이동하고, 관련 자동분류 규칙도 함께 삭제됩니다.`))return;
+  state.transactions.forEach(t=>{if(t.category===name)t.category="기타";});
+  for(const k in state.rules){if(state.rules[k]===name)delete state.rules[k];}
+  state.cats=state.cats.filter(c=>c!==name);
+  delete state.catColors[name];
+  assignColors();queueSave();renderCatManager();render();
+  toast(`'${name}' 삭제됨 — 거래는 '기타'로 이동`);
+}
+function moveCat(name,dir){
+  const i=state.cats.indexOf(name);
+  if(i<0)return;
+  const j=i+dir;
+  if(j<0||j>=state.cats.length)return;
+  const t=state.cats[i];state.cats[i]=state.cats[j];state.cats[j]=t;
+  queueSave();renderCatManager();render();
+}
+function resetCats(){
+  if(!confirm("카테고리 설정을 기본 상태로 초기화할까요?\n\n• 카테고리 목록/순서, 자동분류 규칙, 색상이 기본값으로 돌아갑니다.\n• 거래 내역은 삭제되지 않으나, 모든 거래가 기본 규칙으로 다시 분류됩니다."))return;
+  state.cats=[...DEFAULT_CATS];
+  state.rules={...SEED_RULES};
+  state.catColors={};
+  state.transactions.forEach(t=>{
+    if(t.type==="income"){t.category="수입";return;}
+    t.category=autoCategory(t.desc&&t.desc!=="(내용없음)"?t.desc:"");
+  });
+  assignColors();queueSave();renderCatManager();render();
+  toast("카테고리를 초기화하고 거래를 재분류했습니다");
+}
+
 /* ---------- 동작 ---------- */
 function changeCat(id,cat){
   const t=state.transactions.find(x=>x.id===id);
@@ -829,7 +980,8 @@ function importJSON(file){
     state.transactions=d.transactions;
     state.rules={...SEED_RULES,...(d.rules||{})};
     state.catColors=d.catColors||{};
-    curMonth=null;assignColors();save();render();toast("불러왔습니다");
+    state.cats=Array.isArray(d.cats)&&d.cats.length?d.cats.slice():[...DEFAULT_CATS];
+    curMonth=null;normalizeCats();assignColors();save();render();toast("불러왔습니다");
   }catch(e){toast("불러오기 실패: 올바른 백업 파일이 아닙니다");}};
   fr.readAsText(file);
 }
@@ -864,9 +1016,13 @@ function showTab(id){
   document.getElementById("tabSummary").style.display=id==="summary"?"":"none";
   document.getElementById("tabTx").style.display=id==="tx"?"":"none";
   document.getElementById("tabInput").style.display=id==="input"?"":"none";
+  document.getElementById("tabSettings").style.display=id==="settings"?"":"none";
   document.querySelectorAll("#tabBar button").forEach(b=>b.classList.toggle("on",b.dataset.tab===id));
+  if(id==="settings") renderCatManager();
 }
 document.querySelectorAll("#tabBar button").forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+document.getElementById("btnAddCat").onclick=addCat;
+document.getElementById("btnResetCats").onclick=resetCats;
 document.getElementById("btnClearPaste").onclick=()=>{document.getElementById("paste").value="";};
 document.getElementById("btnAddManual").onclick=addManual;
 document.getElementById("mAmount").addEventListener("input",e=>{
@@ -945,12 +1101,13 @@ if(fbReady){
           state.transactions=r.transactions;
           state.rules={...SEED_RULES,...r.rules};
           state.catColors=r.catColors;
+          state.cats=(r.cats&&r.cats.length)?r.cats.slice():[...DEFAULT_CATS];
           toast("클라우드에서 불러왔습니다");
         }else{
           dbRef.set(cloudSafe(state)).catch(e=>console.warn("first upload",e));
           toast("이 기기 데이터를 클라우드에 올렸습니다");
         }
-        curMonth=null; assignColors(); applyTitle(); render(); updateAuthUI();
+        curMonth=null; normalizeCats(); assignColors(); applyTitle(); render(); updateAuthUI();
       }).catch(e=>{ console.warn(e); updateAuthUI(); if(e&&e.code) toast("동기화 오류: "+e.code); });
     }else{
       dbRef=null; updateAuthUI();
