@@ -77,6 +77,24 @@ textarea#paste:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px 
   font-weight:600;color:var(--muted);padding:5px 13px;border-radius:18px;cursor:pointer}
 .srcbar button.on{background:var(--ink);border-color:var(--ink);color:#fff}
 
+/* edit modal */
+.modal-ov{position:fixed;inset:0;background:rgba(20,58,60,.45);display:none;align-items:center;
+  justify-content:center;padding:20px;z-index:60}
+.modal-ov.show{display:flex}
+.modal{background:var(--card);border-radius:14px;padding:20px;width:100%;max-width:360px;
+  box-shadow:0 10px 40px rgba(0,0,0,.25);max-height:90vh;overflow:auto}
+.modal h3{font-size:15px;font-weight:700;color:var(--ink);margin-bottom:16px}
+.modal .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.modal .fld{margin-bottom:10px}
+.modal .fld label{display:block;font-size:11.5px;color:var(--muted);font-weight:600;margin-bottom:4px}
+.modal .fld input,.modal .fld select{width:100%;border:1px solid var(--line);border-radius:8px;
+  padding:8px 10px;font:inherit;font-size:13.5px;background:#fffef9;color:var(--text)}
+.modal .fld input:focus,.modal .fld select:focus{outline:none;border-color:var(--teal)}
+.modal-btns{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.edit{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--teal);
+  border-radius:7px;padding:3px 8px;cursor:pointer;font-size:14px;line-height:1}
+.edit:hover{border-color:var(--teal);background:#fff}
+
 /* month bar */
 .monthbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:18px}
 .mselect{display:inline-flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);
@@ -287,6 +305,26 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
     </section>
   </div>
 
+</div>
+<div class="modal-ov" id="editOv">
+  <div class="modal">
+    <h3>거래 수정</h3>
+    <div class="fld"><label>날짜</label><input type="date" id="eDate"></div>
+    <div class="row2">
+      <div class="fld"><label>구분</label><select id="eType"><option value="expense">지출</option><option value="income">수입</option></select></div>
+      <div class="fld"><label>금액</label><input type="text" id="eAmount" inputmode="numeric"></div>
+    </div>
+    <div class="fld"><label>내용</label><input type="text" id="eDesc"></div>
+    <div class="row2">
+      <div class="fld"><label>출처</label><select id="eSrc"><option value="">미지정</option><option>현대카드</option><option>삼성카드</option><option>농협통장</option><option>직접입력</option></select></div>
+      <div class="fld"><label>카테고리</label><select id="eCat"></select></div>
+    </div>
+    <div class="fld"><label>메모</label><input type="text" id="eMemo" placeholder="(선택)"></div>
+    <div class="modal-btns">
+      <button class="btn ghost" id="eCancel">취소</button>
+      <button class="btn primary" id="eSave">저장</button>
+    </div>
+  </div>
 </div>
 <div class="toast" id="toast"></div>
 <script>
@@ -612,10 +650,11 @@ function renderTable(){
       <td class="c hide-sm"><select class="catsel srcsel" data-id="${t.id}">${srcOpts}</select></td>
       <td><select class="catsel" data-id="${t.id}">${opts}</select></td>
       <td class="r"><span class="amt ${sign}">${pre}${won(t.amount)}</span></td>
-      <td class="c"><button class="del" data-id="${t.id}" title="삭제">×</button></td>
+      <td class="c"><button class="edit" data-id="${t.id}" title="수정">✎</button> <button class="del" data-id="${t.id}" title="삭제">×</button></td>
     </tr>`;}).join("");
   body.querySelectorAll(".catsel:not(.srcsel)").forEach(s=>s.onchange=()=>changeCat(s.dataset.id,s.value));
   body.querySelectorAll(".srcsel").forEach(s=>s.onchange=()=>changeSrc(s.dataset.id,s.value));
+  body.querySelectorAll(".edit").forEach(b=>b.onclick=()=>openEdit(b.dataset.id));
   body.querySelectorAll(".del").forEach(b=>b.onclick=()=>delTx(b.dataset.id));
 }
 function renderManualCats(){
@@ -648,6 +687,41 @@ function changeSrc(id,src){
   t.source=src;
   queueSave();render();
   toast(src?`출처를 '${src}'(으)로 지정했습니다`:"출처를 해제했습니다");
+}
+
+/* ---------- 거래 수정 (편집창) ---------- */
+let editId=null;
+function openEdit(id){
+  const t=state.transactions.find(x=>x.id===id);
+  if(!t)return;
+  editId=id;
+  const sel=document.getElementById("eCat");
+  sel.innerHTML=allCats().map(c=>`<option ${c===t.category?"selected":""}>${c}</option>`).join("");
+  document.getElementById("eDate").value=t.date;
+  document.getElementById("eType").value=t.type;
+  document.getElementById("eAmount").value=(t.amount||0).toLocaleString("ko-KR");
+  document.getElementById("eDesc").value=t.desc==="(내용없음)"?"":t.desc;
+  document.getElementById("eSrc").value=t.source||"";
+  document.getElementById("eMemo").value=t.memo||"";
+  document.getElementById("editOv").classList.add("show");
+}
+function closeEdit(){editId=null;document.getElementById("editOv").classList.remove("show");}
+function saveEdit(){
+  const t=state.transactions.find(x=>x.id===editId);
+  if(!t){closeEdit();return;}
+  const date=document.getElementById("eDate").value;
+  const amount=+document.getElementById("eAmount").value.replace(/[^\d]/g,"");
+  if(!date){toast("날짜를 입력하세요");return;}
+  if(!amount){toast("금액을 입력하세요");return;}
+  t.date=date;
+  t.type=document.getElementById("eType").value;
+  t.amount=amount;
+  t.desc=document.getElementById("eDesc").value.trim()||"(내용없음)";
+  t.source=document.getElementById("eSrc").value;
+  t.category=document.getElementById("eCat").value;
+  t.memo=document.getElementById("eMemo").value.trim();
+  curMonth=date.slice(0,7);
+  closeEdit();assignColors();save();render();toast("수정했습니다");
 }
 function delMonth(){
   const list=txFiltered();
@@ -734,6 +808,11 @@ function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t
 
 document.getElementById("btnParse").onclick=addParsed;
 document.getElementById("btnDelMonth").onclick=delMonth;
+document.getElementById("eSave").onclick=saveEdit;
+document.getElementById("eCancel").onclick=closeEdit;
+document.getElementById("editOv").onclick=e=>{if(e.target.id==="editOv")closeEdit();};
+document.getElementById("eAmount").addEventListener("input",e=>{
+  let v=e.target.value.replace(/[^\d]/g,"");e.target.value=v?(+v).toLocaleString("ko-KR"):"";});
 
 /* ---------- 탭 전환 ---------- */
 function showTab(id){
