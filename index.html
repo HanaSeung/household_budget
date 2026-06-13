@@ -311,6 +311,26 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
       </div>
     </div>
   </section>
+
+  <section class="card" id="previewCard" style="display:none;border-color:var(--teal);margin-bottom:18px">
+    <div class="txhead">
+      <h2>미리보기 · 확인 후 추가 <span class="tag" id="previewCount"></span></h2>
+    </div>
+    <div class="hint" style="margin-bottom:10px">아직 저장 전입니다. 거래내역과 똑같이 수정할 수 있어요. ✎ 수정 · × 제외</div>
+    <div style="overflow-x:auto">
+      <table class="ttable">
+        <thead><tr>
+          <th>날짜</th><th>내용</th><th class="c hide-sm">출처</th><th>카테고리</th>
+          <th class="r">금액</th><th class="c"></th>
+        </tr></thead>
+        <tbody id="previewBody"></tbody>
+      </table>
+    </div>
+    <div class="modal-btns" style="margin-top:14px">
+      <button class="btn ghost" id="btnPreviewCancel">취소</button>
+      <button class="btn primary" id="btnPreviewCommit">최종 확인</button>
+    </div>
+  </section>
   </div>
 
   <!-- 요약 탭 -->
@@ -1034,7 +1054,7 @@ function changeSrc(id,src){
 /* ---------- 거래 수정 (편집창) ---------- */
 let editId=null;
 function openEdit(id){
-  const t=state.transactions.find(x=>x.id===id);
+  const t=txById(id);
   if(!t)return;
   editId=id;
   const sel=document.getElementById("eCat");
@@ -1049,8 +1069,9 @@ function openEdit(id){
 }
 function closeEdit(){editId=null;document.getElementById("editOv").classList.remove("show");}
 function saveEdit(){
-  const t=state.transactions.find(x=>x.id===editId);
+  const t=txById(editId);
   if(!t){closeEdit();return;}
+  const wasPending=isPending(editId);
   const date=document.getElementById("eDate").value;
   const amount=+document.getElementById("eAmount").value.replace(/[^\d]/g,"");
   if(!date){toast("날짜를 입력하세요");return;}
@@ -1063,7 +1084,10 @@ function saveEdit(){
   t.category=document.getElementById("eCat").value;
   t.memo=document.getElementById("eMemo").value.trim();
   curMonth=date.slice(0,7);
-  closeEdit();assignColors();save();render();toast("수정했습니다");
+  closeEdit();assignColors();
+  if(wasPending){renderPreview();render();}
+  else{save();render();}
+  toast("수정했습니다");
 }
 function delMonth(){
   const list=txFiltered();
@@ -1075,28 +1099,77 @@ function delMonth(){
   state.transactions=state.transactions.filter(t=>!ids.has(t.id));
   save();render();toast(`${list.length}건을 삭제했습니다`);
 }
+/* ---------- 붙여넣기 미리보기 (확인 후 추가) ---------- */
+let pendingTx=[];
+function txById(id){ return pendingTx.find(t=>t.id===id) || state.transactions.find(t=>t.id===id); }
+function isPending(id){ return pendingTx.some(t=>t.id===id); }
+function isDupCommitted(n){
+  return state.transactions.some(t=>
+    n.apprNo
+      ? ((t.apprNo&&t.apprNo===n.apprNo)||(!t.apprNo&&t.date===n.date&&t.amount===n.amount&&t.desc===n.desc&&t.type===n.type))
+      : (t.date===n.date&&t.amount===n.amount&&t.desc===n.desc&&t.type===n.type));
+}
 function addParsed(){
   const ta=document.getElementById("paste");
   const {out,skipped}=parseTransactions(ta.value);
   if(out.length===0){toast("인식된 거래가 없습니다. 형식을 확인하세요");return;}
   const psrc=document.getElementById("pasteSrc").value;
   if(psrc) out.forEach(n=>n.source=psrc);
-  let added=0;
-  out.forEach(n=>{
-    // 승인번호가 있으면 그것으로 중복 판별(같은 날 같은 금액의 별개 결제 구분 가능),
-    // 없으면 기존 방식(날짜+금액+내용+구분)으로 판별
-    const dup=state.transactions.some(t=>
-      n.apprNo
-        ? ((t.apprNo&&t.apprNo===n.apprNo)||(!t.apprNo&&t.date===n.date&&t.amount===n.amount&&t.desc===n.desc&&t.type===n.type))
-        : (t.date===n.date&&t.amount===n.amount&&t.desc===n.desc&&t.type===n.type));
-    if(!dup){state.transactions.push(n);added++;}
-  });
-  ta.value="";
-  curMonth=out[0].date.slice(0,7);
-  assignColors();queueSave();showTab("tx");render();
-  const dupN=out.length-added;
+  // 이미 저장된 거래와 중복되는 항목은 미리보기에서 제외
+  pendingTx=out.filter(n=>!isDupCommitted(n));
+  const dupN=out.length-pendingTx.length;
   document.getElementById("parseHint").textContent="";
-  toast(`${added}건 추가${dupN?` · 중복 ${dupN}건 제외`:""}${skipped?` · 미인식 ${skipped}줄`:""}`);
+  renderPreview();
+  if(pendingTx.length===0){
+    toast(`추가할 새 거래가 없습니다${dupN?` · 중복 ${dupN}건`:""}${skipped?` · 미인식 ${skipped}줄`:""}`);
+  }else{
+    toast(`${pendingTx.length}건 미리보기${dupN?` · 중복 ${dupN}건 제외`:""}${skipped?` · 미인식 ${skipped}줄`:""}`);
+  }
+}
+function renderPreview(){
+  const card=document.getElementById("previewCard");
+  const body=document.getElementById("previewBody");
+  if(!card||!body)return;
+  if(pendingTx.length===0){ card.style.display="none"; body.innerHTML=""; return; }
+  card.style.display="";
+  document.getElementById("previewCount").textContent=`${pendingTx.length}건`;
+  document.getElementById("btnPreviewCommit").textContent=`최종 확인 (${pendingTx.length}건 추가)`;
+  const cats=allCats();
+  body.innerHTML=pendingTx.map(t=>{
+    const opts=cats.map(c=>`<option ${c===t.category?"selected":""}>${c}</option>`).join("");
+    const srcOpts=`<option value="" ${!t.source?"selected":""}>미지정</option>`+
+      SRCS.map(s=>`<option ${s===(t.source||"")?"selected":""}>${s}</option>`).join("");
+    const sign=t.type==="income"?"in":"out";
+    const pre=t.type==="income"?"+":"−";
+    return `<tr data-id="${t.id}">
+      <td class="date">${t.date.slice(5)}</td>
+      <td><span class="desc">${esc(t.desc)}${t.memo?`<span class="memo">${esc(t.memo)}</span>`:""}</span></td>
+      <td class="c hide-sm"><select class="catsel psrcsel" data-id="${t.id}">${srcOpts}</select></td>
+      <td><select class="catsel pcatsel" data-id="${t.id}">${opts}</select></td>
+      <td class="r"><span class="amt ${sign}">${pre}${won(t.amount)}</span></td>
+      <td class="c"><button class="edit" data-id="${t.id}" title="수정">✎</button> <button class="del" data-id="${t.id}" title="제외">×</button></td>
+    </tr>`;}).join("");
+  body.querySelectorAll(".pcatsel").forEach(s=>s.onchange=()=>{const t=pendingTx.find(x=>x.id===s.dataset.id);if(t)t.category=s.value;});
+  body.querySelectorAll(".psrcsel").forEach(s=>s.onchange=()=>{const t=pendingTx.find(x=>x.id===s.dataset.id);if(t)t.source=s.value;});
+  body.querySelectorAll(".edit").forEach(b=>b.onclick=()=>openEdit(b.dataset.id));
+  body.querySelectorAll(".del").forEach(b=>b.onclick=()=>{pendingTx=pendingTx.filter(t=>t.id!==b.dataset.id);renderPreview();});
+}
+function commitPreview(){
+  if(pendingTx.length===0)return;
+  const n=pendingTx.length;
+  const m=pendingTx[0].date.slice(0,7);
+  pendingTx.forEach(t=>state.transactions.push(t));
+  pendingTx=[];
+  document.getElementById("paste").value="";
+  curMonth=m;
+  renderPreview();
+  assignColors();queueSave();render();
+  toast(`${n}건을 거래내역에 추가했습니다`);
+}
+function cancelPreview(){
+  pendingTx=[];
+  renderPreview();
+  toast("미리보기를 취소했습니다");
 }
 function addManual(){
   const date=document.getElementById("mDate").value;
@@ -1110,7 +1183,7 @@ function addManual(){
   state.transactions.push({id:uid(),date,type,amount,desc,memo:"",source:src,category:cat});
   curMonth=date.slice(0,7);
   document.getElementById("mAmount").value="";document.getElementById("mDesc").value="";
-  queueSave();showTab("tx");render();toast("추가했습니다");
+  queueSave();render();toast("추가했습니다");
 }
 
 function exportJSON(){
@@ -1151,6 +1224,8 @@ function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t
   clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove("show"),2600);}
 
 document.getElementById("btnParse").onclick=addParsed;
+document.getElementById("btnPreviewCommit").onclick=commitPreview;
+document.getElementById("btnPreviewCancel").onclick=cancelPreview;
 document.getElementById("btnDelMonth").onclick=delMonth;
 document.getElementById("eSave").onclick=saveEdit;
 document.getElementById("eCancel").onclick=closeEdit;
