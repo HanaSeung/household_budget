@@ -413,17 +413,19 @@ function parseTransactions(raw){
     const iAmt=cols.findIndex(c=>/승인금액|이용금액|출금액/.test(c));
     const iAppr=cols.findIndex(c=>/승인번호/.test(c));
     const iTime=cols.findIndex(c=>/승인시각/.test(c));
+    const iIn=cols.findIndex(c=>/입금액/.test(c));
     const source=isSamsung?"삼성카드":isNhExcel?"농협통장":"현대카드";
     for(let i=1;i<lines.length;i++){
       const line=lines[i];
       const cells=line.split(/\t/);
-      let rawDate,rawAmt,desc,apprNo="",time="";
+      let rawDate,rawAmt,desc,apprNo="",time="",rawIn="";
       if(cells.length>=2){
         rawDate=(cells[iDate]||"").trim();
         rawAmt=iAmt>=0?(cells[iAmt]||""):(cells[cells.length-1]||"");
         desc=iName>=0?(cells[iName]||"").trim().slice(0,40):"(내용없음)";
         apprNo=iAppr>=0?(cells[iAppr]||"").trim():"";
         time=iTime>=0?(cells[iTime]||"").trim():"";
+        rawIn=iIn>=0?(cells[iIn]||""):"";
       }else{
         // 탭이 사라진 경우: 줄 앞 날짜 + 가운데 가맹점명 + 줄 끝 금액
         const mx=line.match(/^\s*(20\d{2}[년.\-\/]\s*\d{1,2}[월.\-\/]\s*\d{1,2}일?)\s+(.*?)\s+([\d,]{3,})\s*원?\s*$/);
@@ -435,11 +437,16 @@ function parseTransactions(raw){
       if(!dm) dm=rawDate.match(/(20\d{2})년\s*(\d{1,2})월\s*(\d{1,2})일/);
       if(!dm){ skipped++; continue; }
       const date=`${dm[1]}-${String(+dm[2]).padStart(2,"0")}-${String(+dm[3]).padStart(2,"0")}`;
-      // 금액
-      const amount=+String(rawAmt).replace(/[^0-9]/g,"");
-      if(!amount){ skipped++; continue; }
-      out.push({id:uid(),date,type:"expense",amount,desc,memo:"",time,apprNo,source,
-        category:autoCategory(desc||line)});
+      // 금액: 출금액(지출) 우선, 비어 있으면 입금액(수입) 확인
+      let type="expense";
+      let amount=+String(rawAmt).replace(/[^0-9]/g,"");
+      if(!amount){
+        const inAmt=+String(rawIn).replace(/[^0-9]/g,"");
+        if(inAmt){ amount=inAmt; type="income"; }
+        else { skipped++; continue; }
+      }
+      out.push({id:uid(),date,type,amount,desc,memo:"",time,apprNo,source,
+        category:type==="income"?"수입":autoCategory(desc||line)});
     }
     return {out,skipped};
   }
