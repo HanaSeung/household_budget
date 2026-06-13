@@ -1054,7 +1054,11 @@ function openCatMenu(anchor,txId,curCat){
     document.addEventListener("keydown",onEscCatMenu,true); },0);
 }
 function delTx(id){
-  state.transactions=state.transactions.filter(t=>t.id!==id);
+  const t=state.transactions.find(x=>x.id===id);
+  if(!t)return;
+  const pre=t.type==="income"?"+":"−";
+  if(!confirm(`이 거래를 삭제할까요?\n\n${t.date} · ${t.desc} · ${pre}${won(t.amount)}원\n\n이 작업은 되돌릴 수 없습니다.`))return;
+  state.transactions=state.transactions.filter(x=>x.id!==id);
   save();render();toast("삭제했습니다");
 }
 function changeSrc(id,src){
@@ -1166,7 +1170,13 @@ function renderPreview(){
   body.querySelectorAll(".pcatsel").forEach(s=>s.onchange=()=>{const t=pendingTx.find(x=>x.id===s.dataset.id);if(t)t.category=s.value;});
   body.querySelectorAll(".psrcsel").forEach(s=>s.onchange=()=>{const t=pendingTx.find(x=>x.id===s.dataset.id);if(t)t.source=s.value;});
   body.querySelectorAll(".edit").forEach(b=>b.onclick=()=>openEdit(b.dataset.id));
-  body.querySelectorAll(".del").forEach(b=>b.onclick=()=>{pendingTx=pendingTx.filter(t=>t.id!==b.dataset.id);renderPreview();});
+  body.querySelectorAll(".del").forEach(b=>b.onclick=()=>{
+    const t=pendingTx.find(x=>x.id===b.dataset.id);
+    if(!t)return;
+    const pre=t.type==="income"?"+":"−";
+    if(!confirm(`이 거래를 미리보기에서 제외할까요?\n\n${t.date} · ${t.desc} · ${pre}${won(t.amount)}원`))return;
+    pendingTx=pendingTx.filter(x=>x.id!==b.dataset.id);renderPreview();
+  });
 }
 function commitPreview(){
   if(pendingTx.length===0)return;
