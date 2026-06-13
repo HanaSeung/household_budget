@@ -193,7 +193,7 @@ textarea#paste:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px 
 .ttable tr:hover td{background:#fffef7}
 .ttable .date{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
 .ttable .desc{font-weight:600;color:var(--text)}
-.ttable .desc .memo{font-weight:500;color:var(--muted);font-size:12px;display:block}
+.ttable .desc .memo{color:var(--ink-soft);font-weight:500;font-size:12px;margin-left:8px;padding-left:8px;border-left:2px solid var(--teal-bg)}
 .ttable .amt{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
 .ttable .amt.out{color:var(--expense)}
 .ttable .amt.in{color:var(--income)}
@@ -824,9 +824,10 @@ function renderTable(){
       SRCS.map(s=>`<option ${s===(t.source||"")?"selected":""}>${s}</option>`).join("");
     const sign=t.type==="income"?"in":"out";
     const pre=t.type==="income"?"+":"−";
+    const hasMemo=!!(t.memo&&t.memo.trim());
     return `<tr data-id="${t.id}">
       <td class="date">${t.date.slice(5)}</td>
-      <td><span class="desc">${esc(t.desc)}${t.memo?`<span class="memo">${esc(t.memo)}</span>`:""}</span></td>
+      <td><span class="desc">${esc(t.desc)}${hasMemo?`<span class="memo">${esc(t.memo)}</span>`:""}</span></td>
       <td class="c hide-sm"><select class="catsel srcsel" data-id="${t.id}">${srcOpts}</select></td>
       <td><select class="catsel" data-id="${t.id}">${opts}</select></td>
       <td class="r"><span class="amt ${sign}">${pre}${won(t.amount)}</span></td>
