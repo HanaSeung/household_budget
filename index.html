@@ -26,7 +26,7 @@ html{scrollbar-gutter:stable}
 /* header */
 .top{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;
   padding-bottom:16px;border-bottom:2px solid var(--ink);margin-bottom:22px}
-.brand{display:flex;align-items:baseline;gap:12px}
+.brand{display:flex;align-items:center;gap:10px}
 .brand .mark{font-size:26px;font-weight:800;color:var(--ink);letter-spacing:-.5px}
 .brand .sub{font-size:12.5px;color:var(--muted);font-weight:600;letter-spacing:.5px}
 .tools{display:flex;gap:8px;flex-wrap:wrap}
@@ -197,8 +197,8 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
 
   <header class="top">
     <div class="brand">
-      <span class="mark">예닮 살림장부</span>
-      <span class="sub">월별 가계부 · 농협 거래내역</span>
+      <span class="mark" id="appTitle">예닮 살림장부</span>
+      <button class="edit" id="btnEditTitle" title="제목 수정" aria-label="제목 수정">✎</button>
     </div>
     <div class="tools">
       <button class="btn" id="btnAuth">Google 로그인</button>
@@ -349,11 +349,11 @@ catch(e){ console.warn("firebase init", e); }
 function encKey(k){ return String(k).replace(/[.#$/\[\]]/g, c=>"~"+c.charCodeAt(0)+"~"); }
 function decKey(k){ return String(k).replace(/~(\d+)~/g, (_,n)=>String.fromCharCode(+n)); }
 function mapKeys(obj,fn){ const o={}; for(const k in obj){ o[fn(k)]=obj[k]; } return o; }
-function cloudSafe(st){ return { transactions: st.transactions||[], rules: mapKeys(st.rules||{},encKey), catColors: mapKeys(st.catColors||{},encKey) }; }
+function cloudSafe(st){ return { title: st.title||"", transactions: st.transactions||[], rules: mapKeys(st.rules||{},encKey), catColors: mapKeys(st.catColors||{},encKey) }; }
 function cloudRestore(cl){
   let txs = cl && cl.transactions;
   if(txs && !Array.isArray(txs)) txs = Object.values(txs);
-  return { transactions: txs||[], rules: mapKeys((cl&&cl.rules)||{},decKey), catColors: mapKeys((cl&&cl.catColors)||{},decKey) };
+  return { title: (cl&&cl.title)||"", transactions: txs||[], rules: mapKeys((cl&&cl.rules)||{},decKey), catColors: mapKeys((cl&&cl.catColors)||{},decKey) };
 }
 
 /* ---------- 기본 카테고리 & 자동분류 규칙 ---------- */
@@ -378,16 +378,18 @@ const PALETTE=["#386f72","#b4502a","#b08642","#1f7a4d","#6b5b95","#3b7a9e",
   "#9e6b3b","#7a3b5b","#4a8c6a","#8a6d3b","#5b6b9e","#9e9e3b"];
 
 /* ---------- 상태 ---------- */
-let state={transactions:[],rules:{...SEED_RULES},catColors:{}};
+const DEFAULT_TITLE="예닮 살림장부";
+let state={title:DEFAULT_TITLE,transactions:[],rules:{...SEED_RULES},catColors:{}};
 function load(){
   try{const r=localStorage.getItem(KEY);
     if(r){const d=JSON.parse(r);
+      state.title=d.title||DEFAULT_TITLE;
       state.transactions=d.transactions||[];
       state.rules={...SEED_RULES,...(d.rules||{})};
       state.catColors=d.catColors||{};
     }
   }catch(e){console.warn("load fail",e);}
-  assignColors();
+  assignColors();applyTitle();
 }
 let saveTimer=null;
 function save(){
@@ -867,6 +869,27 @@ function doLogin(){
 function doLogout(){ if(fbReady) firebase.auth().signOut(); }
 document.getElementById("btnAuth").onclick=()=>{ currentUser?doLogout():doLogin(); };
 
+/* ---------- 제목 편집 ---------- */
+function applyTitle(){
+  const t=state.title||DEFAULT_TITLE;
+  const el=document.getElementById("appTitle");
+  if(el) el.textContent=t;
+  document.title="가계부 · "+t;
+}
+function editTitle(){
+  const cur=state.title||DEFAULT_TITLE;
+  const v=prompt("제목을 입력하세요",cur);
+  if(v===null) return;            // 취소
+  const nt=v.trim();
+  if(!nt){ toast("제목은 비울 수 없습니다"); return; }
+  if(nt===cur) return;            // 변경 없음
+  state.title=nt;
+  applyTitle();
+  save();                          // 즉시 저장 (localStorage + 클라우드)
+  toast("제목을 변경했습니다");
+}
+document.getElementById("btnEditTitle").onclick=editTitle;
+
 if(fbReady){
   firebase.auth().onAuthStateChanged(user=>{
     currentUser=user;
@@ -875,6 +898,7 @@ if(fbReady){
       dbRef.once("value").then(snap=>{
         const r=cloudRestore(snap.val());
         if(r.transactions.length){
+          if(r.title) state.title=r.title;
           state.transactions=r.transactions;
           state.rules={...SEED_RULES,...r.rules};
           state.catColors=r.catColors;
@@ -883,7 +907,7 @@ if(fbReady){
           dbRef.set(cloudSafe(state)).catch(e=>console.warn("first upload",e));
           toast("이 기기 데이터를 클라우드에 올렸습니다");
         }
-        curMonth=null; assignColors(); render(); updateAuthUI();
+        curMonth=null; assignColors(); applyTitle(); render(); updateAuthUI();
       }).catch(e=>{ console.warn(e); updateAuthUI(); if(e&&e.code) toast("동기화 오류: "+e.code); });
     }else{
       dbRef=null; updateAuthUI();
