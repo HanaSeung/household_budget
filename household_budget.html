@@ -520,7 +520,7 @@ function save(){
   }
   catch(e){toast("저장 실패: 브라우저 저장공간을 확인하세요");}
 }
-function queueSave(){clearTimeout(saveTimer);saveTimer=setTimeout(save,400);}
+function queueSave(){save();}  /* 즉시 저장으로 통일 (지연 제거) */
 function flashSave(){const d=document.getElementById("saveDot");
   d.style.opacity=".4";setTimeout(()=>d.style.opacity="1",150);}
 
@@ -1323,19 +1323,14 @@ if(fbReady){
       dbRef=firebase.database().ref("users/"+user.uid);
       dbRef.once("value").then(snap=>{
         const r=cloudRestore(snap.val());
-        if(r.transactions.length){
-          if(r.title) state.title=r.title;
-          state.transactions=r.transactions;
-          state.rules={...SEED_RULES,...r.rules};
-          state.catColors=r.catColors;
-          state.cats=(r.cats&&r.cats.length)?r.cats.slice():[...DEFAULT_CATS];
-          state.catDesc=r.catDesc||{};
-          toast("클라우드에서 불러왔습니다");
-        }else{
-          dbRef.set(cloudSafe(state)).catch(e=>console.warn("first upload",e));
-          toast("이 기기 데이터를 클라우드에 올렸습니다");
-        }
+        state.title=r.title||DEFAULT_TITLE;
+        state.transactions=r.transactions;
+        state.rules={...SEED_RULES,...r.rules};
+        state.catColors=r.catColors;
+        state.cats=(r.cats&&r.cats.length)?r.cats.slice():[...DEFAULT_CATS];
+        state.catDesc=r.catDesc||{};
         curMonth=null; normalizeCats(); assignColors(); applyTitle(); render(); updateAuthUI();
+        toast("클라우드에서 불러왔습니다");
       }).catch(e=>{ console.warn(e); updateAuthUI(); if(e&&e.code) toast("동기화 오류: "+e.code); });
     }else{
       dbRef=null; updateAuthUI();
