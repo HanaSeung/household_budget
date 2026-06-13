@@ -580,15 +580,17 @@ function parseTransactions(raw){
 
   /* ── 형식 자동 감지 ── */
   const header=lines[0];
-  // 삼성카드: 헤더에 "승인일자" + "승인금액(원)"
+  // 삼성카드: 헤더에 "승인일자" + "승인금액"
   const isSamsung=/승인일자/.test(header)&&/승인금액/.test(header);
+  // 삼성카드(이용내역형): 헤더에 "이용일자" + "사용처" (이용금액·혜택금액·결제예정금액)
+  const isSamsung2=/이용일자/.test(header)&&/사용처/.test(header);
   // 현대카드: 헤더에 "승인일" + "승인금액" (승인일자 아님)
   const isHyundai=/^승인일	/.test(header)&&/승인금액/.test(header);
   // 농협 엑셀: 헤더에 "거래일자" + "출금액"
   const isNhExcel=/거래일자/.test(header)&&/출금액/.test(header);
   // 현대카드(이용내역형): 헤더에 "이용일" + "이용금액"
   const isHyundai2=/이용일/.test(header)&&/이용금액/.test(header);
-  const isCardOrNhExcel=isSamsung||isHyundai||isHyundai2||isNhExcel;
+  const isCardOrNhExcel=isSamsung||isSamsung2||isHyundai||isHyundai2||isNhExcel;
 
   /* ── 탭 구분 형식 (카드/농협엑셀) 파서 ── */
   if(isCardOrNhExcel){
@@ -596,12 +598,13 @@ function parseTransactions(raw){
     // 헤더에서 컬럼 인덱스 파악
     const cols=header.split(/\t/);
     const iDate=cols.findIndex(c=>/승인일|거래일자|이용일/.test(c));
-    const iName=cols.findIndex(c=>/가맹점명|이용가맹점|거래기록사항|적요/.test(c));
+    const iName=cols.findIndex(c=>/가맹점명|이용가맹점|거래기록사항|적요|사용처/.test(c));
     const iAmt=cols.findIndex(c=>/승인금액|이용금액|출금액/.test(c));
     const iAppr=cols.findIndex(c=>/승인번호/.test(c));
     const iTime=cols.findIndex(c=>/승인시각/.test(c));
     const iIn=cols.findIndex(c=>/입금액/.test(c));
-    const source=isSamsung?"삼성카드":isNhExcel?"농협통장":"현대카드";
+    const iPay=cols.findIndex(c=>/결제예정금액/.test(c));  // 삼성카드 이용내역형 전용
+    const source=(isSamsung||isSamsung2)?"삼성카드":isNhExcel?"농협통장":"현대카드";
     for(let i=1;i<lines.length;i++){
       const line=lines[i];
       const cells=line.split(/\t/);
@@ -619,18 +622,28 @@ function parseTransactions(raw){
         if(!mx){ skipped++; continue; }
         rawDate=mx[1]; desc=mx[2].trim().slice(0,40)||"(내용없음)"; rawAmt=mx[3];
       }
-      // 날짜 파싱: 2026.06.10 / 2026-06-10 / 2026년 6월 10일
+      // 날짜 파싱: 2026.06.10 / 2026-06-10 / 2026년 6월 10일 / 20260610
       let dm=rawDate.match(/(20\d{2})[.\-\/](\d{1,2})[.\-\/](\d{1,2})/);
       if(!dm) dm=rawDate.match(/(20\d{2})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+      if(!dm) dm=rawDate.match(/^(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/);
       if(!dm){ skipped++; continue; }
       const date=`${dm[1]}-${String(+dm[2]).padStart(2,"0")}-${String(+dm[3]).padStart(2,"0")}`;
+      // 삼성카드 이용내역형: 금액은 결제예정금액 우선, 칸이 없거나 비어 있으면 이용금액으로 대체
+      let allowZero=false;
+      if(isSamsung2){
+        const payRaw=(iPay>=0?(cells[iPay]||""):"").trim();
+        if(iPay>=0 && payRaw!==""){ rawAmt=payRaw; allowZero=true; }  // 결제예정금액 사용(0원도 허용)
+      }
       // 금액: 출금액(지출) 우선, 비어 있으면 입금액(수입) 확인
       let type="expense";
       let amount=+String(rawAmt).replace(/[^0-9]/g,"");
       if(!amount){
-        const inAmt=+String(rawIn).replace(/[^0-9]/g,"");
-        if(inAmt){ amount=inAmt; type="income"; }
-        else { skipped++; continue; }
+        if(allowZero){ amount=0; }  // 삼성2: 결제예정금액 0원 그대로 추가
+        else{
+          const inAmt=+String(rawIn).replace(/[^0-9]/g,"");
+          if(inAmt){ amount=inAmt; type="income"; }
+          else { skipped++; continue; }
+        }
       }
       out.push({id:uid(),date,type,amount,desc,memo:"",time,apprNo,source,
         category:type==="income"?"수입":autoCategory(desc||line)});
