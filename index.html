@@ -131,6 +131,24 @@ textarea#paste:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px 
 .catrow .amt .pct{font-size:11.5px;color:var(--muted);font-weight:600;margin-left:5px}
 .empty{color:var(--muted);font-size:13.5px;text-align:center;padding:26px 0}
 
+/* category drilldown (클릭 시 펼쳐지는 거래 목록) */
+.catrow.clickable{cursor:pointer;border-radius:8px;padding:3px 6px;margin:0 -6px;transition:background .15s}
+.catrow.clickable:hover{background:var(--line-soft)}
+.catrow.open{background:var(--line-soft)}
+.catrow .cn .caret{font-size:10px;color:var(--muted);transition:transform .2s;display:inline-block;margin-left:auto}
+.catrow.open .cn .caret{transform:rotate(90deg)}
+.catdetail{margin:2px 0 10px;padding:8px 10px 6px;background:var(--paper);border:1px solid var(--line-soft);
+  border-radius:10px}
+.ditem{position:relative;display:grid;grid-template-columns:78px 1fr auto;gap:10px;align-items:center;
+  padding:7px 9px;border-radius:7px;font-size:12.5px;overflow:hidden}
+.ditem+.ditem{margin-top:2px}
+.ditem .dbar{position:absolute;left:0;top:0;bottom:0;border-radius:7px;opacity:.13;z-index:0}
+.ditem>*{position:relative;z-index:1}
+.ditem .ddate{color:var(--muted);font-variant-numeric:tabular-nums}
+.ditem .ddesc{font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ditem .damt{font-weight:700;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ditem .dsrc{font-size:11px;color:var(--muted);font-weight:600;margin-left:6px}
+
 /* transaction table */
 .ttable{width:100%;border-collapse:collapse;font-size:13.5px}
 .ttable th{text-align:left;font-size:11.5px;font-weight:700;color:var(--muted);letter-spacing:.5px;
@@ -539,6 +557,7 @@ function monthsAvailable(){
   return [...s].sort().reverse();
 }
 let curMonth=null;
+let openCats=new Set();   // 요약 탭에서 펼쳐진 카테고리 기억
 function ensureMonth(){
   const ms=monthsAvailable();
   if(ms.length===0){curMonth=new Date().toISOString().slice(0,7);return;}
@@ -592,14 +611,38 @@ function renderCategories(){
   const total=rows.reduce((s,r)=>s+r[1],0);
   const max=rows[0][1];
   cc.textContent=`${rows.length}개 항목 · 총 ${won(total)}원`;
+  const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   box.innerHTML=rows.map(([c,v])=>{
     const pct=(v/total*100);
     const w=(v/max*100);
-    return `<div class="catrow">
-      <span class="cn"><span class="dot" style="background:${colorOf(c)}"></span>${c}</span>
-      <span class="track"><span class="fill" style="width:${w}%;background:${colorOf(c)}"></span></span>
+    const open=openCats.has(c);
+    const col=colorOf(c);
+    let detail="";
+    if(open){
+      // 해당 카테고리 거래: 금액 큰 순
+      const items=tx.filter(t=>t.category===c).sort((a,b)=>b.amount-a.amount);
+      const dmax=items.length?items[0].amount:1;
+      const rowsHtml=items.map(t=>{
+        const bw=(t.amount/dmax*100);
+        const src=t.source&&t.source!=="미지정"?`<span class="dsrc">${esc(t.source)}</span>`:"";
+        return `<div class="ditem">
+          <span class="dbar" style="width:${bw}%;background:${col}"></span>
+          <span class="ddate">${t.date.slice(5)}</span>
+          <span class="ddesc">${esc(t.desc||"(내용없음)")}${src}</span>
+          <span class="damt num">${won(t.amount)}원</span>
+        </div>`;}).join("");
+      detail=`<div class="catdetail">${rowsHtml||'<div class="empty" style="padding:10px 0">거래가 없습니다.</div>'}</div>`;
+    }
+    return `<div class="catrow clickable${open?' open':''}" data-cat="${esc(c)}">
+      <span class="cn"><span class="dot" style="background:${col}"></span>${c}<span class="caret">▶</span></span>
+      <span class="track"><span class="fill" style="width:${w}%;background:${col}"></span></span>
       <span class="amt num">${won(v)}<span class="pct">${pct.toFixed(1)}%</span></span>
-    </div>`;}).join("");
+    </div>${detail}`;}).join("");
+  box.querySelectorAll(".catrow").forEach(r=>r.onclick=()=>{
+    const c=r.dataset.cat;
+    if(openCats.has(c)) openCats.delete(c); else openCats.add(c);
+    renderCategories();
+  });
 }
 
 function renderTrend(){
@@ -828,7 +871,7 @@ document.getElementById("btnClearPaste").onclick=()=>{document.getElementById("p
 document.getElementById("btnAddManual").onclick=addManual;
 document.getElementById("mAmount").addEventListener("input",e=>{
   let v=e.target.value.replace(/[^\d]/g,"");e.target.value=v?(+v).toLocaleString("ko-KR"):"";});
-document.getElementById("monthSel").onchange=e=>{curMonth=e.target.value;render();};
+document.getElementById("monthSel").onchange=e=>{curMonth=e.target.value;openCats.clear();render();};
 document.getElementById("btnExport").onclick=exportJSON;
 document.getElementById("btnCsv").onclick=exportCSV;
 document.getElementById("btnImport").onclick=()=>document.getElementById("fileInput").click();
