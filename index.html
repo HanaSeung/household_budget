@@ -321,6 +321,26 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
     </div>
   </section>
 
+  <section class="card" id="inboxCard" style="display:none;border-color:var(--teal);margin-bottom:18px">
+    <div class="txhead">
+      <h2>자동 수집 · 확인 후 등록 <span class="tag" id="inboxCount"></span></h2>
+    </div>
+    <div class="hint" style="margin-bottom:10px">문자·푸시로 자동 수집된 항목입니다. <b>등록</b>해야 거래내역에 반영됩니다. 중복·확인필요 항목은 따로 표시됩니다.</div>
+    <div style="overflow-x:auto">
+      <table class="ttable">
+        <thead><tr>
+          <th>날짜</th><th>내용</th><th class="c hide-sm">출처</th><th>카테고리</th>
+          <th class="r">금액</th><th class="c"></th>
+        </tr></thead>
+        <tbody id="inboxBody"></tbody>
+      </table>
+    </div>
+    <div class="modal-btns" style="margin-top:14px">
+      <button class="btn ghost" id="btnInboxIgnoreAll">모두 무시</button>
+      <button class="btn primary" id="btnInboxRegAll">새 항목 모두 등록</button>
+    </div>
+  </section>
+
   <section class="card" id="previewCard" style="display:none;border-color:var(--teal);margin-bottom:18px">
     <div class="txhead">
       <h2>미리보기 · 확인 후 추가 <span class="tag" id="previewCount"></span></h2>
@@ -740,6 +760,7 @@ function render(){
   renderTable();
   renderManualCats();
   renderCatManager();
+  renderInbox();
 }
 function renderMonthSel(){
   const sel=document.getElementById("monthSel");
@@ -1158,6 +1179,183 @@ function delMonth(){
 let pendingTx=[];
 function txById(id){ return pendingTx.find(t=>t.id===id) || state.transactions.find(t=>t.id===id); }
 function isPending(id){ return pendingTx.some(t=>t.id===id); }
+/* ===== 자동 수집 (문자/푸시 대기열) ===== */
+const pad2=n=>String(+n).padStart(2,"0");
+const todayStr=()=>new Date().toISOString().slice(0,10);
+let inboxRef=null;
+let inboxItems=[];   // [{key, raw, channel, received_at, tx, ok, dup}]
+
+/* 두 거래 후보가 같은가 (승인번호 우선, 없으면 날짜+금액+내용+구분) */
+function sameTx(a,b){
+  if(a.apprNo && b.apprNo) return a.apprNo===b.apprNo;
+  return a.date===b.date && a.amount===b.amount && a.desc===b.desc && a.type===b.type;
+}
+
+/* 농협 푸시 단문 파서 (형식 확정) */
+function parseNH(raw){
+  const t=raw.replace(/\u3000/g," ").replace(/\s+/g," ").trim();
+  let type=null;
+  if(/입금/.test(t)) type="income";
+  else if(/출금/.test(t)) type="expense";
+  if(!type) return null;
+  const am=t.match(/(?:입금|출금)\s*([\d,]+)\s*원/);
+  if(!am) return null;
+  const amount=+am[1].replace(/,/g,"");
+  const dm=t.match(/(\d{1,2})\/(\d{1,2})/);
+  const y=new Date().getFullYear();
+  const date=dm?`${y}-${pad2(dm[1])}-${pad2(dm[2])}`:todayStr();
+  const tm=t.match(/(\d{1,2}):(\d{2})/);
+  const time=tm?`${pad2(tm[1])}:${tm[2]}`:"";
+  let desc="";
+  const dd=t.match(/\d{3}-\d{2}-\*+\d+\s+(.*?)\s*잔액/);
+  if(dd) desc=dd[1].trim();
+  else{ const f=t.match(/\d{1,2}:\d{2}\s+(.*?)\s*잔액/); if(f) desc=f[1].replace(/\d{3}-\d{2}-\*+\d+/,"").trim(); }
+  if(!desc) desc="(내용없음)";
+  return {date,type,amount,desc,time,source:"농협통장",apprNo:""};
+}
+
+/* 카드 SMS 파서 (잠정 — 실물 SMS 캡처 확보 후 확정 예정) */
+function parseCardSMS(raw,hint){
+  const t=raw.replace(/\u3000/g," ").replace(/\s+/g," ").trim();
+  const am=t.match(/([\d,]{2,})\s*원/);
+  if(!am) return null;
+  const amount=+am[1].replace(/,/g,"");
+  if(!amount) return null;
+  const dm=t.match(/(\d{1,2})[\/.\-](\d{1,2})/);
+  const y=new Date().getFullYear();
+  const date=dm?`${y}-${pad2(dm[1])}-${pad2(dm[2])}`:todayStr();
+  const tm=t.match(/(\d{1,2}):(\d{2})/);
+  const time=tm?`${pad2(tm[1])}:${tm[2]}`:"";
+  const type=/취소/.test(t)?"income":"expense";
+  let desc="";
+  const mm=t.match(/\d{1,2}:\d{2}\s+(.+)$/);
+  if(mm) desc=mm[1].trim();
+  else desc=t.slice(-20);
+  desc=desc.replace(/[\/]/g," ").replace(/\s+/g," ").trim().slice(0,40)||"(내용없음)";
+  const source=(/삼성/.test(hint)||/삼성/.test(t))?"삼성카드":(/현대/.test(hint)||/현대/.test(t))?"현대카드":(hint||"");
+  return {date,type,amount,desc,time,source,apprNo:""};
+}
+
+/* 한 항목(raw) → 거래 후보 */
+function parseInbox(item){
+  const raw=(item.raw||"").trim();
+  if(!raw) return null;
+  if(/\(광고\)/.test(raw)) return {ad:true};   // 광고 제외
+  const hint=item.source_hint||"";
+  let tx=null, ok=true;
+  if(/농협|NH/i.test(hint)||/농협/.test(raw)){ tx=parseNH(raw); }
+  else if(/삼성|현대|카드/.test(hint)||/승인|카드/.test(raw)){ tx=parseCardSMS(raw,hint); }
+  else { tx=parseNH(raw)||parseCardSMS(raw,hint); }
+  if(!tx){ tx={date:todayStr(),type:"expense",amount:0,desc:raw.slice(0,40),time:"",source:hint||"",apprNo:""}; ok=false; }
+  if(tx.amount<=0) ok=false;
+  tx.category=tx.type==="income"?"수입":autoCategory(tx.desc||raw);
+  return {tx,ok};
+}
+
+/* Firebase inbox 스냅샷 → inboxItems 재구성 */
+function buildInbox(val){
+  inboxItems=[];
+  if(val){
+    for(const key in val){
+      const item=val[key]||{};
+      const p=parseInbox(item);
+      if(!p) continue;
+      if(p.ad){ if(inboxRef) inboxRef.child(key).remove().catch(()=>{}); continue; }
+      inboxItems.push({key, raw:item.raw||"", channel:item.channel||"", received_at:item.received_at||0, tx:p.tx, ok:p.ok});
+    }
+    inboxItems.sort((a,b)=>(a.received_at||0)-(b.received_at||0));
+  }
+  renderInbox();
+}
+
+function renderInbox(){
+  const card=document.getElementById("inboxCard");
+  const body=document.getElementById("inboxBody");
+  if(!card||!body) return;
+  if(inboxItems.length===0){ card.style.display="none"; body.innerHTML=""; return; }
+  card.style.display="";
+  // 중복 표시: (1) 이미 등록된 거래와 중복  (2) 대기열 내부에서 앞 항목과 중복
+  const seen=[];
+  inboxItems.forEach(it=>{
+    const t=it.tx;
+    const internalDup=seen.some(s=>sameTx(s,t));
+    it.dup=isDupCommitted(t)||internalDup;
+    seen.push(t);
+  });
+  document.getElementById("inboxCount").textContent=`${inboxItems.length}건`;
+  const cats=allCats();
+  body.innerHTML=inboxItems.map(it=>{
+    const t=it.tx;
+    const opts=cats.map(c=>`<option ${c===t.category?"selected":""}>${c}</option>`).join("");
+    const srcOpts=`<option value="" ${!t.source?"selected":""}>미지정</option>`+
+      SRCS.map(s=>`<option ${s===(t.source||"")?"selected":""}>${s}</option>`).join("");
+    const sign=t.type==="income"?"in":"out";
+    const pre=t.type==="income"?"+":"−";
+    const flags=[];
+    if(it.dup) flags.push(`<span class="memo" style="color:var(--rust,#b4502a)">중복</span>`);
+    if(!it.ok) flags.push(`<span class="memo" style="color:var(--rust,#b4502a)">확인필요</span>`);
+    return `<tr data-key="${it.key}" ${it.dup?'style="opacity:.55"':''}>
+      <td class="date">${t.date.slice(5)}${t.time?`<span class="memo">${t.time}</span>`:""}</td>
+      <td><span class="desc">${esc(t.desc)} ${flags.join(" ")}</span></td>
+      <td class="c hide-sm"><select class="catsel ibsrc" data-key="${it.key}">${srcOpts}</select></td>
+      <td><select class="catsel ibcat" data-key="${it.key}">${opts}</select></td>
+      <td class="r"><span class="amt ${sign}">${pre}${won(t.amount)}</span></td>
+      <td class="c" style="white-space:nowrap">
+        <button class="btn primary ibreg" data-key="${it.key}" style="padding:3px 9px;font-size:12px">등록</button>
+        <button class="del ibign" data-key="${it.key}" title="무시">×</button>
+      </td>
+    </tr>`;
+  }).join("");
+  body.querySelectorAll(".ibcat").forEach(s=>s.onchange=()=>{const it=inboxItems.find(x=>x.key===s.dataset.key);if(it)it.tx.category=s.value;});
+  body.querySelectorAll(".ibsrc").forEach(s=>s.onchange=()=>{const it=inboxItems.find(x=>x.key===s.dataset.key);if(it)it.tx.source=s.value;});
+  body.querySelectorAll(".ibreg").forEach(b=>b.onclick=()=>registerInbox(b.dataset.key));
+  body.querySelectorAll(".ibign").forEach(b=>b.onclick=()=>ignoreInbox(b.dataset.key));
+}
+
+function txFromCand(t){
+  return {id:uid(),date:t.date,type:t.type,amount:t.amount,desc:t.desc,memo:"",time:t.time||"",apprNo:t.apprNo||"",source:t.source||"",category:t.category};
+}
+function removeInboxKey(key){
+  inboxItems=inboxItems.filter(x=>x.key!==key);
+  if(inboxRef) inboxRef.child(key).remove().catch(e=>console.warn("inbox remove",e));
+}
+function registerInbox(key){
+  const it=inboxItems.find(x=>x.key===key);
+  if(!it) return;
+  if(it.dup && !confirm(`이미 등록된 거래로 보입니다. 그래도 등록할까요?\n\n${it.tx.desc} · ${won(it.tx.amount)}원`)) return;
+  state.transactions.push(txFromCand(it.tx));
+  curMonth=it.tx.date.slice(0,7);
+  removeInboxKey(key);
+  queueSave(); render();
+  toast("거래내역에 등록했습니다");
+}
+function ignoreInbox(key){
+  const it=inboxItems.find(x=>x.key===key);
+  if(it && !confirm(`이 항목을 대기열에서 삭제할까요?\n\n${it.tx.desc} · ${won(it.tx.amount)}원`)) return;
+  removeInboxKey(key);
+  renderInbox();
+  toast("대기열에서 삭제했습니다");
+}
+function registerAllInbox(){
+  const fresh=inboxItems.filter(it=>!it.dup);
+  if(fresh.length===0){ toast("등록할 새 항목이 없습니다"); return; }
+  if(!confirm(`새 항목 ${fresh.length}건을 모두 등록할까요?`)) return;
+  fresh.forEach(it=>state.transactions.push(txFromCand(it.tx)));
+  curMonth=fresh[fresh.length-1].tx.date.slice(0,7);
+  fresh.forEach(it=>removeInboxKey(it.key));
+  queueSave(); render();
+  toast(`${fresh.length}건을 등록했습니다`);
+}
+function ignoreAllInbox(){
+  if(inboxItems.length===0) return;
+  if(!confirm(`대기열의 ${inboxItems.length}건을 모두 삭제할까요?`)) return;
+  const keys=inboxItems.map(it=>it.key);
+  inboxItems=[];
+  renderInbox();
+  keys.forEach(k=>{ if(inboxRef) inboxRef.child(k).remove().catch(()=>{}); });
+  toast("대기열을 비웠습니다");
+}
+
 function isDupCommitted(n){
   return state.transactions.some(t=>
     n.apprNo
@@ -1285,6 +1483,8 @@ function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t
   clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove("show"),2600);}
 
 document.getElementById("btnParse").onclick=addParsed;
+document.getElementById("btnInboxRegAll").onclick=registerAllInbox;
+document.getElementById("btnInboxIgnoreAll").onclick=ignoreAllInbox;
 document.getElementById("btnPreviewCommit").onclick=commitPreview;
 document.getElementById("btnPreviewCancel").onclick=cancelPreview;
 document.getElementById("btnDelMonth").onclick=delMonth;
@@ -1391,9 +1591,16 @@ if(fbReady){
         state.catDesc=r.catDesc||{};
         curMonth=null; normalizeCats(); assignColors(); applyTitle(); render(); updateAuthUI();
         toast("클라우드에서 불러왔습니다");
+        /* 자동 수집 대기열(inbox) 실시간 감시 시작 */
+        if(inboxRef) inboxRef.off();
+        inboxRef=firebase.database().ref("inbox");
+        inboxRef.on("value", snap=>buildInbox(snap.val()), err=>console.warn("inbox listen",err));
       }).catch(e=>{ console.warn(e); updateAuthUI(); if(e&&e.code) toast("동기화 오류: "+e.code); });
     }else{
-      dbRef=null; updateAuthUI();
+      dbRef=null;
+      if(inboxRef){ inboxRef.off(); inboxRef=null; }
+      inboxItems=[]; renderInbox();
+      updateAuthUI();
     }
   });
 }
