@@ -1133,10 +1133,12 @@ function changeSrc(id,src){
 
 /* ---------- 거래 수정 (편집창) ---------- */
 let editId=null;
+let editInboxKey=null;   // 대기열 항목 편집 시 사용
 function openEdit(id){
   const t=txById(id);
   if(!t)return;
   editId=id;
+  editInboxKey=null;
   const sel=document.getElementById("eCat");
   sel.innerHTML=allCats().map(c=>`<option ${c===t.category?"selected":""}>${c}</option>`).join("");
   document.getElementById("eDate").value=t.date;
@@ -1147,8 +1149,9 @@ function openEdit(id){
   document.getElementById("eMemo").value=t.memo||"";
   document.getElementById("editOv").classList.add("show");
 }
-function closeEdit(){editId=null;document.getElementById("editOv").classList.remove("show");}
+function closeEdit(){editId=null;editInboxKey=null;document.getElementById("editOv").classList.remove("show");}
 function saveEdit(){
+  if(editInboxKey){ saveEditInbox(); return; }
   const t=txById(editId);
   if(!t){closeEdit();return;}
   const wasPending=isPending(editId);
@@ -1265,6 +1268,7 @@ function buildInbox(val){
       const p=parseInbox(item);
       if(!p) continue;
       if(p.ad){ if(inboxRef) inboxRef.child(key).remove().catch(()=>{}); continue; }
+      if(item.override && typeof item.override==="object"){ Object.assign(p.tx, item.override); p.ok=true; }
       inboxItems.push({key, raw:item.raw||"", channel:item.channel||"", received_at:item.received_at||0, tx:p.tx, ok:p.ok});
     }
     inboxItems.sort((a,b)=>(a.received_at||0)-(b.received_at||0));
@@ -1305,33 +1309,66 @@ function renderInbox(){
       <td><select class="catsel ibcat" data-key="${it.key}">${opts}</select></td>
       <td class="r"><span class="amt ${sign}">${pre}${won(t.amount)}</span></td>
       <td class="c" style="white-space:nowrap">
-        <button class="btn primary ibreg" data-key="${it.key}" style="padding:3px 9px;font-size:12px">등록</button>
+        <button class="edit ibedit" data-key="${it.key}" title="수정">✎</button>
         <button class="del ibign" data-key="${it.key}" title="무시">×</button>
       </td>
     </tr>`;
   }).join("");
-  body.querySelectorAll(".ibcat").forEach(s=>s.onchange=()=>{const it=inboxItems.find(x=>x.key===s.dataset.key);if(it)it.tx.category=s.value;});
-  body.querySelectorAll(".ibsrc").forEach(s=>s.onchange=()=>{const it=inboxItems.find(x=>x.key===s.dataset.key);if(it)it.tx.source=s.value;});
-  body.querySelectorAll(".ibreg").forEach(b=>b.onclick=()=>registerInbox(b.dataset.key));
+  body.querySelectorAll(".ibcat").forEach(s=>s.onchange=()=>{const it=inboxItems.find(x=>x.key===s.dataset.key);if(it){it.tx.category=s.value;persistInboxOverride(it.key,it.tx);}});
+  body.querySelectorAll(".ibsrc").forEach(s=>s.onchange=()=>{const it=inboxItems.find(x=>x.key===s.dataset.key);if(it){it.tx.source=s.value;persistInboxOverride(it.key,it.tx);}});
+  body.querySelectorAll(".ibedit").forEach(b=>b.onclick=()=>openEditInbox(b.dataset.key));
   body.querySelectorAll(".ibign").forEach(b=>b.onclick=()=>ignoreInbox(b.dataset.key));
 }
 
 function txFromCand(t){
-  return {id:uid(),date:t.date,type:t.type,amount:t.amount,desc:t.desc,memo:"",time:t.time||"",apprNo:t.apprNo||"",source:t.source||"",category:t.category};
+  return {id:uid(),date:t.date,type:t.type,amount:t.amount,desc:t.desc,memo:t.memo||"",time:t.time||"",apprNo:t.apprNo||"",source:t.source||"",category:t.category};
+}
+/* 대기열 항목 편집 — 기존 편집창 재사용 */
+function inboxOverrideObj(t){
+  return {date:t.date,type:t.type,amount:t.amount,desc:t.desc,memo:t.memo||"",time:t.time||"",source:t.source||"",category:t.category,apprNo:t.apprNo||""};
+}
+function persistInboxOverride(key,t){
+  if(inboxRef) inboxRef.child(key).child("override").set(inboxOverrideObj(t)).catch(e=>console.warn("inbox override",e));
+}
+function openEditInbox(key){
+  const it=inboxItems.find(x=>x.key===key);
+  if(!it) return;
+  editInboxKey=key; editId=null;
+  const t=it.tx;
+  const sel=document.getElementById("eCat");
+  sel.innerHTML=allCats().map(c=>`<option ${c===t.category?"selected":""}>${c}</option>`).join("");
+  document.getElementById("eDate").value=t.date;
+  document.getElementById("eType").value=t.type;
+  document.getElementById("eAmount").value=(t.amount||0).toLocaleString("ko-KR");
+  document.getElementById("eDesc").value=t.desc==="(내용없음)"?"":t.desc;
+  document.getElementById("eSrc").value=t.source||"";
+  document.getElementById("eMemo").value=t.memo||"";
+  document.getElementById("editOv").classList.add("show");
+}
+function saveEditInbox(){
+  const it=inboxItems.find(x=>x.key===editInboxKey);
+  if(!it){closeEdit();return;}
+  const date=document.getElementById("eDate").value;
+  const amount=+document.getElementById("eAmount").value.replace(/[^\d]/g,"");
+  if(!date){toast("날짜를 입력하세요");return;}
+  if(!amount){toast("금액을 입력하세요");return;}
+  const t=it.tx;
+  t.date=date;
+  t.type=document.getElementById("eType").value;
+  t.amount=amount;
+  t.desc=document.getElementById("eDesc").value.trim()||"(내용없음)";
+  t.source=document.getElementById("eSrc").value;
+  t.category=document.getElementById("eCat").value;
+  t.memo=document.getElementById("eMemo").value.trim();
+  it.ok=true;
+  persistInboxOverride(editInboxKey,t);
+  closeEdit();
+  renderInbox();
+  toast("수정했습니다");
 }
 function removeInboxKey(key){
   inboxItems=inboxItems.filter(x=>x.key!==key);
   if(inboxRef) inboxRef.child(key).remove().catch(e=>console.warn("inbox remove",e));
-}
-function registerInbox(key){
-  const it=inboxItems.find(x=>x.key===key);
-  if(!it) return;
-  if(it.dup && !confirm(`이미 등록된 거래로 보입니다. 그래도 등록할까요?\n\n${it.tx.desc} · ${won(it.tx.amount)}원`)) return;
-  state.transactions.push(txFromCand(it.tx));
-  curMonth=it.tx.date.slice(0,7);
-  removeInboxKey(key);
-  queueSave(); render();
-  toast("거래내역에 등록했습니다");
 }
 function ignoreInbox(key){
   const it=inboxItems.find(x=>x.key===key);
