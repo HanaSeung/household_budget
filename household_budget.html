@@ -161,7 +161,7 @@ textarea#paste:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px 
 .ditem{position:relative;display:grid;grid-template-columns:78px 16px 1fr auto;gap:10px;align-items:center;
   padding:7px 9px;border-radius:7px;font-size:12.5px;overflow:hidden}
 .ditem+.ditem{margin-top:2px}
-.ditem .dbar{position:absolute;left:0;top:0;bottom:0;border-radius:7px;opacity:.13;z-index:0}
+.ditem .dbar{position:absolute;left:0;top:0;bottom:0;border-radius:7px;opacity:.28;z-index:0}
 .ditem>*{position:relative;z-index:1}
 .ditem .ddate{color:var(--muted);font-variant-numeric:tabular-nums}
 .ditem .ddot{width:13px;height:13px;border-radius:50%;cursor:pointer;justify-self:center;
@@ -170,6 +170,7 @@ textarea#paste:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px 
 .ditem .ddesc{font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ditem .damt{font-weight:700;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 .ditem .dsrc{font-size:11px;color:var(--muted);font-weight:600;margin-left:6px}
+.ditem .ddesc .memo{color:var(--ink-soft);font-weight:500;font-size:12px;margin-left:8px;padding-left:8px;border-left:2px solid var(--teal-bg)}
 
 /* category quick-pick menu (drilldown) */
 .catmenu{position:absolute;z-index:80;background:var(--card);border:1px solid var(--line);border-radius:10px;
@@ -804,11 +805,14 @@ function renderCategories(){
       const rowsHtml=items.map(t=>{
         const bw=(t.amount/dmax*100);
         const src=t.source&&t.source!=="미지정"?`<span class="dsrc">${esc(t.source)}</span>`:"";
+        const memoTxt=t.memo&&t.memo.trim()?t.memo.trim():"";
+        const memo=memoTxt?`<span class="memo">${esc(memoTxt)}</span>`:"";
+        const ddTitle=memoTxt?` title="${esc((t.desc||"(내용없음)")+(t.source&&t.source!=="미지정"?" · "+t.source:"")+" · "+memoTxt)}"`:"";
         return `<div class="ditem">
           <span class="dbar" style="width:${bw}%;background:${col}"></span>
           <span class="ddate">${t.date.slice(5)}</span>
           <span class="ddot" data-id="${t.id}" data-cat="${esc(t.category)}" style="background:${col}" title="카테고리 변경"></span>
-          <span class="ddesc">${esc(t.desc||"(내용없음)")}${src}</span>
+          <span class="ddesc"${ddTitle}>${esc(t.desc||"(내용없음)")}${src}${memo}</span>
           <span class="damt num">${won(t.amount)}원</span>
         </div>`;}).join("");
       detail=`<div class="catdetail">${rowsHtml||'<div class="empty" style="padding:10px 0">거래가 없습니다.</div>'}</div>`;
