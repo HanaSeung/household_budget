@@ -141,6 +141,16 @@ textarea#paste:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px 
 
 /* category breakdown */
 .catlist{display:flex;flex-direction:column;gap:9px}
+.cathead{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.cathead h2{margin-bottom:0}
+.sortToggle{position:relative;display:inline-flex;align-items:stretch;border:1px solid var(--line);
+  border-radius:9px;background:var(--line-soft);padding:3px;cursor:pointer;user-select:none;width:150px;height:30px;flex:none}
+.sortToggle .knob{position:absolute;top:3px;left:3px;width:72px;height:22px;border-radius:7px;background:var(--teal);
+  box-shadow:0 1px 2px rgba(20,58,60,.25);transition:left .22s cubic-bezier(.4,0,.2,1)}
+.sortToggle.bydate .knob{left:75px}
+.sortToggle .sopt{position:relative;z-index:1;flex:1;display:inline-flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:600;color:var(--muted);transition:color .18s;white-space:nowrap;letter-spacing:0;text-transform:none}
+.sortToggle .sopt.on{color:#fff}
 .catrow{display:grid;grid-template-columns:120px 1fr 132px;gap:12px;align-items:center}
 .catrow .cn{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:7px}
 .catrow .dot{width:10px;height:10px;border-radius:3px;flex:none}
@@ -374,7 +384,14 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
   <div class="grid">
     <!-- 카테고리 -->
     <section class="card">
-      <h2>카테고리별 지출 <span class="tag" id="catCount"></span></h2>
+      <div class="cathead">
+        <h2>카테고리별 지출 <span class="tag" id="catCount"></span></h2>
+        <div class="sortToggle" id="catSortToggle" role="button" tabindex="0" aria-label="세부내역 정렬: 금액순 또는 날짜순 전환" title="세부내역 정렬 전환">
+          <span class="knob"></span>
+          <span class="sopt on" data-mode="amount">금액순</span>
+          <span class="sopt" data-mode="date">날짜순</span>
+        </div>
+      </div>
       <div class="catlist" id="catList"><div class="empty">이번 달 지출 내역이 없습니다.</div></div>
     </section>
 
@@ -736,6 +753,7 @@ function monthsAvailable(){
 }
 let curMonth=null;
 let openCats=new Set();   // 요약 탭에서 펼쳐진 카테고리 기억
+let catSort=localStorage.getItem("catDetailSort")==="date"?"date":"amount";   // 세부내역 정렬: amount(금액순)/date(날짜순·최근 먼저)
 function ensureMonth(){
   const ms=monthsAvailable();
   if(ms.length===0){curMonth=new Date().toISOString().slice(0,7);return;}
@@ -799,9 +817,10 @@ function renderCategories(){
     const col=colorOf(c);
     let detail="";
     if(open){
-      // 해당 카테고리 거래: 금액 큰 순
-      const items=tx.filter(t=>t.category===c).sort((a,b)=>b.amount-a.amount);
-      const dmax=items.length?items[0].amount:1;
+      // 해당 카테고리 거래: 정렬 모드(금액순 / 날짜순·최근 먼저)
+      const items=tx.filter(t=>t.category===c).sort((a,b)=>
+        catSort==="date" ? (b.date.localeCompare(a.date)||b.id.localeCompare(a.id)) : (b.amount-a.amount));
+      const dmax=items.length?Math.max(...items.map(t=>t.amount)):1;
       const rowsHtml=items.map(t=>{
         const bw=(t.amount/dmax*100);
         const src=t.source&&t.source!=="미지정"?`<span class="dsrc">${esc(t.source)}</span>`:"";
@@ -1572,6 +1591,25 @@ document.querySelectorAll("#inputSeg button").forEach(b=>b.onclick=()=>{
   if(manual&&!document.getElementById("mDate").value)
     document.getElementById("mDate").value=new Date().toISOString().slice(0,10);
 });
+
+/* 카테고리 세부내역 정렬 토글 (금액순 / 날짜순) */
+(function(){
+  const tg=document.getElementById("catSortToggle");
+  if(!tg)return;
+  const apply=()=>{
+    tg.classList.toggle("bydate",catSort==="date");
+    tg.querySelectorAll(".sopt").forEach(s=>s.classList.toggle("on",s.dataset.mode===catSort));
+  };
+  const toggle=()=>{
+    catSort=(catSort==="date")?"amount":"date";
+    try{localStorage.setItem("catDetailSort",catSort);}catch(e){}
+    apply();
+    renderCategories();
+  };
+  tg.onclick=toggle;
+  tg.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();toggle();}};
+  apply();
+})();
 
 /* ---------- 시작 ---------- */
 /* ---------- 로그인 / 클라우드 동기화 ---------- */
