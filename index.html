@@ -1221,9 +1221,12 @@ function parseNH(raw){
   return {date,type,amount,desc,time,source:"농협통장",apprNo:""};
 }
 
-/* 카드 SMS 파서 (잠정 — 실물 SMS 캡처 확보 후 확정 예정) */
+/* 카드 SMS 파서 (현대/삼성 실물 SMS 기준 확정) */
 function parseCardSMS(raw,hint){
-  const t=raw.replace(/\u3000/g," ").replace(/\s+/g," ").trim();
+  let t=raw.replace(/\u3000/g," ").replace(/\s+/g," ").trim();
+  // '누적…원' 잔액 표기 제거 (거래금액·가맹점 오염 방지)
+  const cumul=t.match(/누적\s*[\d,]+\s*원/);
+  if(cumul) t=t.replace(cumul[0]," ").replace(/\s+/g," ").trim();
   const am=t.match(/([\d,]{2,})\s*원/);
   if(!am) return null;
   const amount=+am[1].replace(/,/g,"");
