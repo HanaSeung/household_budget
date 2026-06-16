@@ -29,6 +29,9 @@ html{scrollbar-gutter:stable}
 .brand{display:flex;align-items:center;gap:10px}
 .brand .mark{font-size:26px;font-weight:800;color:var(--ink);letter-spacing:-.5px}
 .brand .sub{font-size:12.5px;color:var(--muted);font-weight:600;letter-spacing:.5px}
+.brand .brand-sep{width:1px;height:18px;background:var(--line);margin:0 2px;flex:none}
+.brand .today{font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap}
+@media(max-width:560px){.brand{flex-wrap:wrap}.brand .brand-sep{display:none}.brand .today{flex-basis:100%;font-size:12px}}
 .tools{display:flex;gap:8px;flex-wrap:wrap}
 .btn{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--ink);
   font:inherit;font-size:13.5px;font-weight:600;padding:8px 13px;border-radius:9px;cursor:pointer;
@@ -271,6 +274,8 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
     <div class="brand">
       <span class="mark" id="appTitle">예닮 살림장부</span>
       <button class="edit" id="btnEditTitle" title="제목 수정" aria-label="제목 수정">✎</button>
+      <span class="brand-sep" aria-hidden="true"></span>
+      <span class="today" id="todayDate"></span>
     </div>
     <div class="tools">
       <button class="btn" id="btnAuth">Google 로그인</button>
@@ -1658,6 +1663,16 @@ function editTitle(){
 }
 document.getElementById("btnEditTitle").onclick=editTitle;
 
+/* ---------- 오늘 날짜 표시 ---------- */
+function renderToday(){
+  const el=document.getElementById("todayDate");
+  if(!el)return;
+  const W=["일","월","화","수","목","금","토"];
+  const d=new Date();
+  el.textContent=`${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일 (${W[d.getDay()]})`;
+}
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden) renderToday(); });
+
 if(fbReady){
   firebase.auth().onAuthStateChanged(user=>{
     currentUser=user;
@@ -1690,6 +1705,7 @@ if(fbReady){
 load();
 render();
 updateAuthUI();
+renderToday();
 </script>
 </body>
 </html>
