@@ -71,7 +71,10 @@ textarea#paste:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px 
 .tabbar button.on{background:var(--ink);color:#fff}
 
 /* swipe tab navigation */
-#tabViews{touch-action:pan-y}
+#tabViews{overflow:hidden;touch-action:pan-y}
+#tabTrack{display:flex;width:500%}
+#tabTrack>div{width:20%;flex:none;align-self:flex-start}
+#tabSummary{order:1}#tabTx{order:2}#tabInput{order:3}#tabEval{order:4}#tabSettings{order:5}
 .xscroll{touch-action:pan-x pan-y;-webkit-overflow-scrolling:touch}
 
 /* eval tab */
@@ -351,8 +354,9 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
   </div>
 
   <div id="tabViews">
+  <div id="tabTrack">
   <!-- 입력 탭 -->
-  <div id="tabInput" style="display:none">
+  <div id="tabInput">
   <section class="card" style="margin-bottom:18px">
     <h2>거래 입력 <span class="tag">붙여넣기 또는 직접 추가</span></h2>
     <div class="seg" id="inputSeg" style="margin-bottom:13px">
@@ -465,7 +469,7 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
   </div>
 
   <!-- 거래내역 탭 -->
-  <div id="tabTx" style="display:none">
+  <div id="tabTx">
     <section class="card">
       <div class="txhead">
         <h2>거래 내역 <span class="tag" id="txCount"></span></h2>
@@ -487,12 +491,12 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
   </div>
 
   <!-- 평가 탭 -->
-  <div id="tabEval" style="display:none">
+  <div id="tabEval">
     <div id="evalBody"></div>
   </div>
 
   <!-- 설정 탭 -->
-  <div id="tabSettings" style="display:none">
+  <div id="tabSettings">
     <section class="card">
       <div class="txhead">
         <h2>카테고리 관리 <span class="tag">추가 · 수정 · 순서 · 삭제</span></h2>
@@ -507,6 +511,7 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
       </div>
       <div id="catManager"></div>
     </section>
+  </div>
   </div>
   </div>
 
@@ -844,6 +849,7 @@ function render(){
   renderCatManager();
   renderInbox();
   renderEval();
+  if(typeof setVPHeight==="function") setVPHeight();
 }
 function renderMonthSel(){
   const sel=document.getElementById("monthSel");
@@ -1790,73 +1796,92 @@ document.getElementById("eType").addEventListener("change",e=>{
   if(editInboxKey) return;
   document.getElementById("eOneoffWrap").style.display=(e.target.value==="income")?"none":"";});
 
-/* ---------- 탭 전환 ---------- */
+/* ---------- 탭 전환 (트랙 슬라이드) ---------- */
 const TAB_ORDER=["summary","tx","input","eval","settings"];
+const TAB_DIV={summary:"tabSummary",tx:"tabTx",input:"tabInput",eval:"tabEval",settings:"tabSettings"};
+const TAB_STEP=100/TAB_ORDER.length;
 let curTab="summary";
-function slideIn(dir){
-  const v=document.getElementById("tabViews");
-  if(!v) return;
-  if(!dir){ v.style.transition="none"; v.style.transform="none"; v.style.opacity="1"; return; }
-  v.style.transition="none";
-  v.style.transform=`translateX(${dir>0?28:-28}px)`;
-  v.style.opacity="0.35";
-  requestAnimationFrame(()=>requestAnimationFrame(()=>{
-    v.style.transition="transform .25s ease-out, opacity .25s ease-out";
-    v.style.transform="translateX(0)";
-    v.style.opacity="1";
-  }));
+let tabAnimating=false, tabAnimTimer=null;
+function tabIdx(id){const i=TAB_ORDER.indexOf(id);return i<0?0:i;}
+function panelH(id){const p=document.getElementById(TAB_DIV[id]);return p?p.offsetHeight:0;}
+function setTrackX(pct,anim){
+  const t=document.getElementById("tabTrack");
+  if(!t)return;
+  t.style.transition=anim?"transform .28s ease-out":"none";
+  t.style.transform=`translateX(${pct}%)`;
+}
+function setVPHeight(){
+  if(tabAnimating)return;
+  const vp=document.getElementById("tabViews");
+  if(vp) vp.style.height=panelH(curTab)+"px";
+}
+function holdBigHeight(ids){
+  const vp=document.getElementById("tabViews");
+  if(!vp)return;
+  let big=0; ids.forEach(id=>{const h=panelH(id); if(h>big)big=h;});
+  vp.style.height=big+"px";
+  tabAnimating=true;
+}
+function endHold(delay){
+  if(tabAnimTimer) clearTimeout(tabAnimTimer);
+  tabAnimTimer=setTimeout(()=>{ tabAnimating=false; setVPHeight(); }, delay);
 }
 function showTab(id){
-  const pi=TAB_ORDER.indexOf(curTab), ni=TAB_ORDER.indexOf(id);
-  const dir=(pi<0||ni<0||pi===ni)?0:(ni>pi?1:-1);
-  curTab=id;
-  document.getElementById("tabSummary").style.display=id==="summary"?"":"none";
-  document.getElementById("tabTx").style.display=id==="tx"?"":"none";
-  document.getElementById("tabInput").style.display=id==="input"?"":"none";
-  document.getElementById("tabEval").style.display=id==="eval"?"":"none";
-  document.getElementById("tabSettings").style.display=id==="settings"?"":"none";
+  if(TAB_ORDER.indexOf(id)<0)return;
+  const prev=curTab; curTab=id;
   document.querySelectorAll("#tabBar button").forEach(b=>b.classList.toggle("on",b.dataset.tab===id));
-  if(id==="settings") renderCatManager();
-  if(id==="eval") renderEval();
-  slideIn(dir);
+  holdBigHeight([prev,id]);
+  setTrackX(-tabIdx(id)*TAB_STEP,true);
+  endHold(310);
 }
 document.querySelectorAll("#tabBar button").forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
 (function(){
-  const v=document.getElementById("tabViews");
-  if(!v) return;
+  const vp=document.getElementById("tabViews"), track=document.getElementById("tabTrack");
+  if(!vp||!track)return;
   const NOSWIPE="select,input,textarea,button,a,.ttable,.srcbar,.seg,.sortToggle,.xscroll";
+  const N=TAB_ORDER.length;
   let sx=0,sy=0,drag=false,lock=null,w=1;
-  v.addEventListener("pointerdown",e=>{
-    if(e.pointerType==="mouse"&&e.button!==0) return;
-    if(e.target.closest&&e.target.closest(NOSWIPE)) return;
-    drag=true;lock=null;sx=e.clientX;sy=e.clientY;w=v.clientWidth||1;
-    v.style.transition="none";
+  vp.addEventListener("pointerdown",e=>{
+    if(e.pointerType==="mouse"&&e.button!==0)return;
+    if(e.target.closest&&e.target.closest(NOSWIPE))return;
+    drag=true;lock=null;sx=e.clientX;sy=e.clientY;w=vp.clientWidth||1;
+    track.style.transition="none";
   });
-  v.addEventListener("pointermove",e=>{
-    if(!drag) return;
+  vp.addEventListener("pointermove",e=>{
+    if(!drag)return;
     const dx=e.clientX-sx, dy=e.clientY-sy;
     if(lock===null){
-      if(Math.abs(dx)<8&&Math.abs(dy)<8) return;
+      if(Math.abs(dx)<8&&Math.abs(dy)<8)return;
       lock=Math.abs(dx)>Math.abs(dy);
-      if(!lock){ drag=false; v.style.transform="none"; return; }
+      if(!lock){drag=false;return;}
+      const i=tabIdx(curTab), ids=[curTab];
+      if(i>0)ids.push(TAB_ORDER[i-1]); if(i<N-1)ids.push(TAB_ORDER[i+1]);
+      holdBigHeight(ids);
     }
-    const idx=TAB_ORDER.indexOf(curTab);
-    let mv=dx;
-    if((idx===0&&dx>0)||(idx===TAB_ORDER.length-1&&dx<0)) mv=dx*0.3;
-    v.style.transform=`translateX(${mv*0.35}px)`;
+    const idx=tabIdx(curTab);
+    let move=dx;
+    if((idx===0&&dx>0)||(idx===N-1&&dx<0)) move=dx*0.3;
+    setTrackX(-idx*TAB_STEP+(move/w)*TAB_STEP,false);
     e.preventDefault();
   });
-  function endDrag(e){
-    if(!drag) return; drag=false;
+  function end(e){
+    if(!drag)return;drag=false;
     if(lock){
-      const dx=e.clientX-sx, thr=w*0.22, idx=TAB_ORDER.indexOf(curTab);
-      if(dx<=-thr&&idx<TAB_ORDER.length-1){ showTab(TAB_ORDER[idx+1]); return; }
+      const dx=e.clientX-sx, thr=w*0.22, idx=tabIdx(curTab);
+      if(dx<=-thr&&idx<N-1){ showTab(TAB_ORDER[idx+1]); return; }
       if(dx>=thr&&idx>0){ showTab(TAB_ORDER[idx-1]); return; }
     }
-    v.style.transition="transform .2s ease-out"; v.style.transform="translateX(0)"; v.style.opacity="1";
+    setTrackX(-tabIdx(curTab)*TAB_STEP,true);
+    endHold(290);
   }
-  v.addEventListener("pointerup",endDrag);
-  v.addEventListener("pointercancel",endDrag);
+  vp.addEventListener("pointerup",end);
+  vp.addEventListener("pointercancel",end);
+  window.addEventListener("resize",()=>{ setTrackX(-tabIdx(curTab)*TAB_STEP,false); setVPHeight(); });
+  if(window.ResizeObserver){
+    const ro=new ResizeObserver(()=>setVPHeight());
+    TAB_ORDER.forEach(id=>{const el=document.getElementById(TAB_DIV[id]); if(el) ro.observe(el);});
+  }
+  setTrackX(0,false);
 })();
 document.getElementById("btnAddCat").onclick=()=>openCatEdit("add");
 document.getElementById("btnResetCats").onclick=resetCats;
