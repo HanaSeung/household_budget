@@ -210,8 +210,8 @@ textarea#paste:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px 
 .catrow .dot{width:10px;height:10px;border-radius:3px;flex:none}
 .catrow .track{display:block;height:9px;background:var(--line-soft);border-radius:6px;overflow:hidden}
 .catrow .fill{display:block;height:100%;border-radius:6px;transition:width .5s cubic-bezier(.2,.7,.3,1)}
-.catrow .amt{font-size:13.5px;font-weight:700;text-align:right;white-space:nowrap}
-.catrow .amt .pct{font-size:11.5px;color:var(--muted);font-weight:600;margin-left:5px}
+.catrow .amt{display:flex;justify-content:flex-end;align-items:baseline;gap:6px;font-size:13.5px;font-weight:700;white-space:nowrap}
+.catrow .amt .pct{font-size:11.5px;color:var(--muted);font-weight:600;width:42px;text-align:right;flex:none}
 .empty{color:var(--muted);font-size:13.5px;text-align:center;padding:26px 0}
 
 /* category drilldown (클릭 시 펼쳐지는 거래 목록) */
@@ -910,7 +910,7 @@ function renderCategories(){
     return `<div class="catrow clickable${open?' open':''}" data-cat="${esc(c)}">
       <span class="cn"><span class="dot" style="background:${col}"></span>${c}<span class="caret">▶</span></span>
       <span class="track"><span class="fill" style="width:${w}%;background:${col}"></span></span>
-      <span class="amt num">${won(v)}<span class="pct">${pct.toFixed(1)}%</span></span>
+      <span class="amt num"><span class="amtv">${won(v)}</span><span class="pct">${pct.toFixed(1)}%</span></span>
     </div>${detail}`;}).join("");
   box.querySelectorAll(".catrow").forEach(r=>r.onclick=()=>{
     const c=r.dataset.cat;
