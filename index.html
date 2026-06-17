@@ -75,7 +75,7 @@ textarea#paste:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px 
 #tabTrack{display:flex;width:500%}
 #tabTrack>div{width:20%;flex:none;align-self:flex-start}
 #tabSummary{order:1}#tabTx{order:2}#tabInput{order:3}#tabEval{order:4}#tabSettings{order:5}
-.xscroll{touch-action:pan-x pan-y;-webkit-overflow-scrolling:touch}
+.xscroll{touch-action:pan-y;-webkit-overflow-scrolling:touch}
 
 /* eval tab */
 .evstats{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
@@ -1840,13 +1840,22 @@ document.querySelectorAll("#tabBar button").forEach(b=>b.onclick=()=>showTab(b.d
   if(!vp||!track)return;
   const NOSWIPE="select,input,textarea,button,a,.srcbar,.seg,.sortToggle";
   const N=TAB_ORDER.length;
-  let sx=0,sy=0,drag=false,lock=null,w=1,scrollEl=null;
+  let sx=0,sy=0,drag=false,lock=null,w=1,scrollEl=null,startSL=0,maxSL=0,trackMode=false;
+  function startTrack(){
+    trackMode=true;
+    const i=tabIdx(curTab), ids=[curTab];
+    if(i>0)ids.push(TAB_ORDER[i-1]); if(i<N-1)ids.push(TAB_ORDER[i+1]);
+    holdBigHeight(ids);
+  }
   vp.addEventListener("pointerdown",e=>{
     if(e.pointerType==="mouse"&&e.button!==0)return;
     if(e.target.closest&&e.target.closest(NOSWIPE))return;
     scrollEl=(e.target.closest)?e.target.closest(".xscroll"):null;
-    drag=true;lock=null;sx=e.clientX;sy=e.clientY;w=vp.clientWidth||1;
+    startSL=scrollEl?scrollEl.scrollLeft:0;
+    maxSL=scrollEl?(scrollEl.scrollWidth-scrollEl.clientWidth):0;
+    drag=true;lock=null;trackMode=false;sx=e.clientX;sy=e.clientY;w=vp.clientWidth||1;
     track.style.transition="none";
+    try{vp.setPointerCapture(e.pointerId);}catch(_){}
   });
   vp.addEventListener("pointermove",e=>{
     if(!drag)return;
@@ -1855,29 +1864,33 @@ document.querySelectorAll("#tabBar button").forEach(b=>b.onclick=()=>showTab(b.d
       if(Math.abs(dx)<8&&Math.abs(dy)<8)return;
       lock=Math.abs(dx)>Math.abs(dy);
       if(!lock){drag=false;return;}
-      if(scrollEl){
-        const maxSL=scrollEl.scrollWidth-scrollEl.clientWidth-1;
-        if((dx<0&&scrollEl.scrollLeft<maxSL)||(dx>0&&scrollEl.scrollLeft>0)){ drag=false; return; }
-      }
-      const i=tabIdx(curTab), ids=[curTab];
-      if(i>0)ids.push(TAB_ORDER[i-1]); if(i<N-1)ids.push(TAB_ORDER[i+1]);
-      holdBigHeight(ids);
+      if(!(scrollEl&&maxSL>0)) startTrack();
     }
-    const idx=tabIdx(curTab);
-    let move=dx;
-    if((idx===0&&dx>0)||(idx===N-1&&dx<0)) move=dx*0.3;
-    setTrackX(-idx*TAB_STEP+(move/w)*TAB_STEP,false);
-    e.preventDefault();
+    if(scrollEl&&maxSL>0&&!trackMode){
+      const desired=startSL-dx;
+      if(desired>=0&&desired<=maxSL){ scrollEl.scrollLeft=desired; e.preventDefault(); return; }
+      scrollEl.scrollLeft=desired<0?0:maxSL;
+      sx=e.clientX;
+      startTrack();
+      e.preventDefault();return;
+    }
+    if(trackMode){
+      const idx=tabIdx(curTab);
+      let move=e.clientX-sx;
+      if((idx===0&&move>0)||(idx===N-1&&move<0)) move=move*0.3;
+      setTrackX(-idx*TAB_STEP+(move/w)*TAB_STEP,false);
+      e.preventDefault();
+    }
   });
   function end(e){
     if(!drag)return;drag=false;
-    if(lock){
-      const dx=e.clientX-sx, thr=w*0.22, idx=tabIdx(curTab);
-      if(dx<=-thr&&idx<N-1){ showTab(TAB_ORDER[idx+1]); return; }
-      if(dx>=thr&&idx>0){ showTab(TAB_ORDER[idx-1]); return; }
+    if(trackMode){
+      const move=e.clientX-sx, thr=w*0.22, idx=tabIdx(curTab);
+      if(move<=-thr&&idx<N-1){ showTab(TAB_ORDER[idx+1]); return; }
+      if(move>=thr&&idx>0){ showTab(TAB_ORDER[idx-1]); return; }
+      setTrackX(-tabIdx(curTab)*TAB_STEP,true);
+      endHold(290);
     }
-    setTrackX(-tabIdx(curTab)*TAB_STEP,true);
-    endHold(290);
   }
   vp.addEventListener("pointerup",end);
   vp.addEventListener("pointercancel",end);
