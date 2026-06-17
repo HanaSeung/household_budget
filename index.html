@@ -109,6 +109,16 @@ textarea#paste:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px 
 .evtot .fix{background:var(--teal-bg)} .evtot .fix .lab,.evtot .fix .v{color:var(--teal)}
 .evtot .once{background:var(--expense-bg)} .evtot .once .lab,.evtot .once .v{color:var(--expense)}
 .evtot .norm{background:var(--line-soft)} .evtot .norm .lab{color:var(--muted)} .evtot .norm .v{color:var(--ink)}
+.evtot .b{cursor:pointer;border:2px solid transparent;transition:border-color .15s}
+.evtot .fix.on{border-color:var(--teal)}
+.evtot .once.on{border-color:var(--expense)}
+.evtot .norm.on{border-color:var(--muted)}
+.natdetail{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:4px 12px 8px;margin-bottom:8px}
+.nathead{font-size:13px;font-weight:600;color:var(--ink);padding:9px 2px 3px}
+.natitem{display:flex;align-items:center;gap:8px;padding:7px 2px;border-top:1px solid var(--line-soft)}
+.natitem .nm{flex:1;min-width:0;font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.natitem .nm small{color:var(--muted);font-size:11.5px}
+.natitem .am{font-size:13px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;white-space:nowrap}
 .evsug{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line-soft);flex-wrap:wrap}
 .evsug:first-child{border-top:0}
 .evsug .nm{flex:1;min-width:130px;font-size:14px;color:var(--text)}
@@ -970,6 +980,7 @@ function markOneoff(id){
   toast("일회성으로 표시했습니다");
 }
 function dismissOneoff(id){ oneoffDismissed.add(id); renderEval(); }
+let openNature=null;
 function renderEval(){
   const box=document.getElementById("evalBody");
   if(!box) return;
@@ -1100,18 +1111,42 @@ function renderEval(){
     </section>`:"";
 
   // ----- 성격별 합계 + 일상 페이스 -----
+  const NAT={
+    fix:{label:"고정지출", list:exp.filter(t=>isFixedCat(t.category))},
+    once:{label:"일회성", list:exp.filter(t=>t.oneoff && !isFixedCat(t.category))},
+    norm:{label:"일상(변동)", list:exp.filter(t=>!isFixedCat(t.category) && !t.oneoff)}
+  };
+  function natDetail(){
+    if(!openNature || !NAT[openNature]) return "";
+    const d=NAT[openNature];
+    const list=d.list.slice().sort((a,b)=>b.amount-a.amount);
+    if(!list.length) return `<div class="natdetail"><div class="empty" style="padding:12px 0">해당 거래가 없습니다.</div></div>`;
+    const rows=list.map(t=>{
+      const nm=t.desc&&t.desc.trim()&&t.desc!=="(내용없음)"?t.desc.trim():t.category;
+      return `<div class="natitem"><span class="nm">${esc(nm)} <small>· ${esc(t.category)} · ${t.date.slice(5)}</small></span><span class="am">${won(t.amount)}원</span></div>`;
+    }).join("");
+    return `<div class="natdetail"><div class="nathead">${d.label} · ${list.length}건 · 금액순</div>${rows}</div>`;
+  }
   const totCard=`<section class="card" style="margin-bottom:18px">
     <h2>지출 성격별 합계</h2>
     <div class="evtot">
-      <div class="b fix"><div class="lab">고정지출</div><div class="v">${won(fixedTotal)}원</div><div class="sub">카테고리 고정비</div></div>
-      <div class="b once"><div class="lab">일회성</div><div class="v">${won(onceTotal)}원</div><div class="sub">표시한 거래</div></div>
-      <div class="b norm"><div class="lab">일상(변동)</div><div class="v">${won(normalTotal)}원</div><div class="sub">나머지</div></div>
+      <div class="b fix${openNature==='fix'?' on':''}" data-nat="fix"><div class="lab">고정지출</div><div class="v">${won(fixedTotal)}원</div><div class="sub">카테고리 고정비</div></div>
+      <div class="b once${openNature==='once'?' on':''}" data-nat="once"><div class="lab">일회성</div><div class="v">${won(onceTotal)}원</div><div class="sub">표시한 거래</div></div>
+      <div class="b norm${openNature==='norm'?' on':''}" data-nat="norm"><div class="lab">일상(변동)</div><div class="v">${won(normalTotal)}원</div><div class="sub">나머지</div></div>
     </div>
+    <div id="natPanel">${natDetail()}</div>
+    <div class="evnote" style="margin-top:2px">칸을 누르면 해당 지출의 세부 내역이 펼쳐집니다.</div>
   </section>`;
 
   box.innerHTML=forecastCard+sugCard+totCard+evalCard;
   box.querySelectorAll("[data-yes]").forEach(b=>b.onclick=()=>markOneoff(b.dataset.yes));
   box.querySelectorAll("[data-no]").forEach(b=>b.onclick=()=>dismissOneoff(b.dataset.no));
+  box.querySelectorAll("[data-nat]").forEach(b=>b.onclick=()=>{
+    openNature=(openNature===b.dataset.nat)?null:b.dataset.nat;
+    box.querySelectorAll("[data-nat]").forEach(x=>x.classList.toggle("on",x.dataset.nat===openNature));
+    const panel=box.querySelector("#natPanel");
+    if(panel) panel.innerHTML=natDetail();
+  });
 }
 
 function renderSrcBar(){
@@ -1855,7 +1890,6 @@ document.querySelectorAll("#tabBar button").forEach(b=>b.onclick=()=>showTab(b.d
     maxSL=scrollEl?(scrollEl.scrollWidth-scrollEl.clientWidth):0;
     drag=true;lock=null;trackMode=false;sx=e.clientX;sy=e.clientY;w=vp.clientWidth||1;
     track.style.transition="none";
-    try{vp.setPointerCapture(e.pointerId);}catch(_){}
   });
   vp.addEventListener("pointermove",e=>{
     if(!drag)return;
@@ -1864,6 +1898,7 @@ document.querySelectorAll("#tabBar button").forEach(b=>b.onclick=()=>showTab(b.d
       if(Math.abs(dx)<8&&Math.abs(dy)<8)return;
       lock=Math.abs(dx)>Math.abs(dy);
       if(!lock){drag=false;return;}
+      try{vp.setPointerCapture(e.pointerId);}catch(_){}
       if(!(scrollEl&&maxSL>0)) startTrack();
     }
     if(scrollEl&&maxSL>0&&!trackMode){
