@@ -1838,12 +1838,13 @@ document.querySelectorAll("#tabBar button").forEach(b=>b.onclick=()=>showTab(b.d
 (function(){
   const vp=document.getElementById("tabViews"), track=document.getElementById("tabTrack");
   if(!vp||!track)return;
-  const NOSWIPE="select,input,textarea,button,a,.ttable,.srcbar,.seg,.sortToggle,.xscroll";
+  const NOSWIPE="select,input,textarea,button,a,.srcbar,.seg,.sortToggle";
   const N=TAB_ORDER.length;
-  let sx=0,sy=0,drag=false,lock=null,w=1;
+  let sx=0,sy=0,drag=false,lock=null,w=1,scrollEl=null;
   vp.addEventListener("pointerdown",e=>{
     if(e.pointerType==="mouse"&&e.button!==0)return;
     if(e.target.closest&&e.target.closest(NOSWIPE))return;
+    scrollEl=(e.target.closest)?e.target.closest(".xscroll"):null;
     drag=true;lock=null;sx=e.clientX;sy=e.clientY;w=vp.clientWidth||1;
     track.style.transition="none";
   });
@@ -1854,6 +1855,10 @@ document.querySelectorAll("#tabBar button").forEach(b=>b.onclick=()=>showTab(b.d
       if(Math.abs(dx)<8&&Math.abs(dy)<8)return;
       lock=Math.abs(dx)>Math.abs(dy);
       if(!lock){drag=false;return;}
+      if(scrollEl){
+        const maxSL=scrollEl.scrollWidth-scrollEl.clientWidth-1;
+        if((dx<0&&scrollEl.scrollLeft<maxSL)||(dx>0&&scrollEl.scrollLeft>0)){ drag=false; return; }
+      }
       const i=tabIdx(curTab), ids=[curTab];
       if(i>0)ids.push(TAB_ORDER[i-1]); if(i<N-1)ids.push(TAB_ORDER[i+1]);
       holdBigHeight(ids);
