@@ -1131,8 +1131,8 @@ function renderFoodBudget(){
       `<div class="det">예산 <span class="fbEdit" data-w="${wk}" data-l="${label}">${won(m.budget)}</span> · 이월 <span class="fbCarry" data-w="${wk}" data-l="${label}" data-carry="${m.carryIn}" data-manual="${m.manualCarry?1:0}">${sign(m.carryIn)}</span>${m.manualCarry?'<span class="fbTag">수동</span>':""} · 지출 ${won(m.spend)}</div></div>`;
   }).join("");
 
-  const rangeLabel=`${md(fbAdd(displayed[0],6))} ← ${md(displayed[displayed.length-1])}`;
-  const head=`<div class="fbHead"><h2>식비 예산 <span class="tag">주간 이월</span></h2><span class="fbMonth">${rangeLabel}</span></div>`;
+  const rangeLabel=`${md(displayed[displayed.length-1])} ~ ${md(fbAdd(displayed[0],6))}`;
+  const head=`<div class="fbHead"><h2>식비 예산</h2><span class="fbMonth">${rangeLabel}</span></div>`;
   const foot=hasMore
     ? `<div class="fbNote fbMore" id="fbMore">↓ 이전 주 더 보기</div>`
     : `<div class="fbNote">추적 시작 주(${md(fb.startWeek)})까지 모두 표시됨</div>`;
