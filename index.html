@@ -1093,7 +1093,7 @@ function renderFoodBudget(){
   const fb=fbState();
   const thisWeek=fbSunday(fbTodayIso());
   if(!fb.startWeek){
-    box.innerHTML=`<div class="fbHead"><h2>식비 예산 <span class="tag">주간 이월</span></h2></div>`+
+    box.innerHTML=`<div class="fbHead"><h2>식비 예산</h2></div>`+
       `<div class="fbStart"><p>식비는 매주 예산을 정해 남으면 다음 주로 이월하고,<br>모자라면 다음 주에서 당겨 씁니다.</p><button class="btn primary" id="fbStartBtn">이번 주부터 식비 예산 시작</button></div>`;
     const b=document.getElementById("fbStartBtn"); if(b) b.onclick=()=>fbEditWeek(thisWeek,"이번 주");
     return;
