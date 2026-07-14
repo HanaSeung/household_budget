@@ -189,7 +189,7 @@ textarea#paste:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px 
 .mselect select:focus{outline:none}
 
 /* summary cards */
-.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px}
+.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:18px;align-items:start}
 .scard{background:var(--card);border:1px solid var(--line-soft);border-radius:var(--r);padding:15px 17px;
   box-shadow:var(--shadow);position:relative;overflow:hidden}
 .scard .lab{font-size:12.5px;color:var(--muted);font-weight:600;margin-bottom:6px}
@@ -198,6 +198,11 @@ textarea#paste:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px 
 .scard.in .val{color:var(--income)}
 .scard.out .val{color:var(--expense)}
 .scard.net .val{color:var(--ink)}
+.scard.net.has{cursor:pointer}
+.scard .netdet{margin-top:9px;border-top:1px dashed var(--line);padding-top:7px}
+.scard .netdet .r{display:flex;justify-content:space-between;gap:6px;font-size:11.5px;padding:1.5px 0;
+  font-variant-numeric:tabular-nums;color:var(--ink)}
+.scard .netdet .r.sub{color:var(--muted);padding-left:8px}
 .scard .bar{position:absolute;left:0;top:0;bottom:0;width:4px}
 .scard.in .bar{background:var(--income)}
 .scard.out .bar{background:var(--expense)}
@@ -495,7 +500,7 @@ select.catsel:focus{outline:none;border-color:var(--teal)}
   <div class="summary">
     <div class="scard in"><span class="bar"></span><div class="lab">수입</div><div class="val num" id="sumIn">0<small>원</small></div></div>
     <div class="scard out"><span class="bar"></span><div class="lab">지출</div><div class="val num" id="sumOut">0<small>원</small></div></div>
-    <div class="scard net"><span class="bar"></span><div class="lab">잔액 (수입−지출)</div><div class="val num" id="sumNet">0<small>원</small></div></div>
+    <div class="scard net" id="netCard" title="수입 − 지출 = 잔액"><span class="bar"></span><div class="lab">잔액</div><div class="val num" id="sumNet">0<small>원</small></div><div class="netdet" id="netDet" style="display:none"></div></div>
   </div>
 
   <div class="grid">
@@ -647,14 +652,14 @@ function cloudRestore(cl){
 const DEFAULT_CATS=["식비","외식","간식","의료/건강","교통/주차","차량유지비","생활용품","생활/잡비","공과금","구독/렌탈","보험",
   "자녀/교육","가족용돈","교회/사역","후원/헌금","경조사/선물","여행/휴가","카드대금","수입","기타"];
 // 삭제·이름변경 보호 카테고리 (시스템이 의존)
-const PROTECTED_CATS=["수입","기타"];
+const PROTECTED_CATS=["수입","기타","카드대금"];
 // 기본 카테고리 설명 (관리 화면에 표시 · 사용자가 수정 가능)
 const DEFAULT_CAT_DESC={
   "식비":"장보기·식재료·마트","외식":"식당·배달 음식","간식":"카페·디저트·군것질","의료/건강":"병원·약국·건강",
   "교통/주차":"대중교통·주차·통행료","차량유지비":"주유·정비·수리·타이어","생활용품":"세제·주방·청소용품 등","생활/잡비":"세탁·미용·수수료 등 기타 생활성 지출",
   "공과금":"전기·가스·수도·통신·관리비","구독/렌탈":"넷플릭스·가전 렌탈·정기결제 등","보험":"보장성·실손 등 보험료","자녀/교육":"학원·등록금·교재",
   "가족용돈":"가족 용돈","교회/사역":"교회·전도·수련회","후원/헌금":"헌금·선교·후원",
-  "경조사/선물":"축의·부의·선물","여행/휴가":"여행 중 숙박·교통·식사·입장료·기념품 등","카드대금":"카드 결제대금","수입":"급여·이자 등 들어온 돈","기타":"분류되지 않은 지출"
+  "경조사/선물":"축의·부의·선물","여행/휴가":"여행 중 숙박·교통·식사·입장료·기념품 등","카드대금":"카드 결제대금. 지출에는 잡히지 않고, 잔액에서만 빠져나감","수입":"급여·이자 등 들어온 돈","기타":"분류되지 않은 지출"
 };
 // 키워드(거래기록사항/내용에 포함) → 카테고리
 const SEED_RULES={
@@ -738,6 +743,8 @@ function normalizeCats(){
   used.forEach(c=>{ if(!state.cats.includes(c)) state.cats.push(c); });
   // 6) 기본 설명 보충 (사용자가 비운 경우는 ""로 정의되어 덮어쓰지 않음)
   state.cats.forEach(c=>{ if(state.catDesc[c]===undefined && DEFAULT_CAT_DESC[c]!==undefined) state.catDesc[c]=DEFAULT_CAT_DESC[c]; });
+  // 7) 카드대금 설명 갱신 (구버전 "카드 결제대금"만 교체 · 사용자가 직접 고친 문구는 보존)
+  if(state.catDesc["카드대금"]==="카드 결제대금") state.catDesc["카드대금"]=DEFAULT_CAT_DESC["카드대금"];
 }
 function allCats(){ return state.cats.slice(); }
 function catProtected(c){ return PROTECTED_CATS.includes(c); }
@@ -754,6 +761,25 @@ function autoCategory(text){
   if(!text)return "기타";
   for(const kw in state.rules){ if(text.indexOf(kw)>=0) return state.rules[kw]; }
   return "기타";
+}
+
+/* ---------- 카드대금 (지출 아님 · 잔액에서만 차감) ----------
+   카드 결제는 승인 시점에 이미 지출로 기록되므로, 카드대금 출금은 소비가 아니라 정산(이체)이다.
+   → 지출 집계에서는 제외하고, 잔액(수입−지출−카드대금)에서만 뺀다. */
+const CARDPAY_CAT="카드대금";
+const isCardPay=t=>t.type==="expense" && t.category===CARDPAY_CAT;
+const isSpend=t=>t.type==="expense" && t.category!==CARDPAY_CAT;   // 실제 소비 지출
+const sumAmt=list=>list.reduce((s,t)=>s+t.amount,0);
+/* 카드대금 카드사별 집계 (source는 전부 농협통장이라 desc 내용으로 판별) */
+function cardPayBreak(txs){
+  const b={삼성:0,현대:0,기타:0};
+  txs.filter(isCardPay).forEach(t=>{
+    const d=t.desc||"";
+    if(d.indexOf("삼성")>=0) b.삼성+=t.amount;
+    else if(d.indexOf("현대")>=0) b.현대+=t.amount;
+    else b.기타+=t.amount;
+  });
+  return b;
 }
 
 /* ---------- 거래내역 파서 ----------
@@ -925,17 +951,42 @@ function renderMonthSel(){
   const n=txOfMonth(curMonth).length;
   document.getElementById("monthMeta").textContent=`${n}건의 거래`;
 }
+let netOpen=false;   // 잔액 카드 내 카드대금 내역 펼침 여부
 function renderSummary(){
   const tx=txOfMonth(curMonth);
-  const inc=tx.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
-  const out=tx.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
+  const inc=sumAmt(tx.filter(t=>t.type==="income"));
+  const out=sumAmt(tx.filter(isSpend));            // 카드대금 제외한 실제 소비
+  const card=sumAmt(tx.filter(isCardPay));         // 카드대금 (지출 아님, 잔액에서만 차감)
   document.getElementById("sumIn").innerHTML=won(inc)+'<small>원</small>';
   document.getElementById("sumOut").innerHTML=won(out)+'<small>원</small>';
-  const net=inc-out;
+  const net=inc-out-card;
   document.getElementById("sumNet").innerHTML=(net<0?"−":"")+won(Math.abs(net))+'<small>원</small>';
+  // 잔액 카드: PC=툴팁 / 폰=터치하면 카드 안에서 카드대금 내역 펼침
+  const nc=document.getElementById("netCard");
+  const nd=document.getElementById("netDet");
+  if(nc&&nd){
+    if(card>0){
+      const b=cardPayBreak(tx);
+      const parts=[], rows=[];
+      if(b.삼성>0){ parts.push(`삼성 ${won(b.삼성)}원`); rows.push(`<div class="r sub"><span>삼성</span><span>${won(b.삼성)}</span></div>`); }
+      if(b.현대>0){ parts.push(`현대 ${won(b.현대)}원`); rows.push(`<div class="r sub"><span>현대</span><span>${won(b.현대)}</span></div>`); }
+      if(b.기타>0){ parts.push(`기타 ${won(b.기타)}원`); rows.push(`<div class="r sub"><span>기타</span><span>${won(b.기타)}</span></div>`); }
+      nc.title=`수입 − 지출 − 카드대금 = 잔액\n카드대금: ${parts.join(" · ")}`;
+      nc.classList.add("has");
+      nd.innerHTML=`<div class="r"><span>카드대금</span><span>${won(card)}</span></div>`+rows.join("");
+      nd.style.display=netOpen?"block":"none";
+      nc.onclick=()=>{ netOpen=!netOpen; nd.style.display=netOpen?"block":"none"; };
+    } else {
+      nc.title="수입 − 지출 = 잔액";
+      nc.classList.remove("has");
+      nd.innerHTML="";
+      nd.style.display="none";
+      nc.onclick=null;
+    }
+  }
 }
 function renderCategories(){
-  const tx=txOfMonth(curMonth).filter(t=>t.type==="expense");
+  const tx=txOfMonth(curMonth).filter(isSpend);   // 카드대금 제외
   const box=document.getElementById("catList");
   const cc=document.getElementById("catCount");
   if(tx.length===0){box.innerHTML='<div class="empty">이번 달 지출 내역이 없습니다.</div>';cc.textContent="";return;}
@@ -999,7 +1050,7 @@ function renderTrend(){
   ];
   const keys=SEGDEF.map(s=>s.key);
   const rows=ms.map(m=>{
-    const ex=txOfMonth(m).filter(t=>t.type==="expense");
+    const ex=txOfMonth(m).filter(isSpend);   // 카드대금 제외
     const by={};keys.forEach(k=>by[k]=0);let etc=0,total=0;
     ex.forEach(t=>{total+=t.amount;const s=t.source||"";
       if(keys.includes(s))by[s]+=t.amount;else etc+=t.amount;});
@@ -1152,9 +1203,9 @@ function renderEval(){
   const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   const prevKey=mk=>{let[yy,mm]=mk.split("-").map(Number);mm--;if(mm<1){mm=12;yy--;}return yy+"-"+String(mm).padStart(2,"0");};
   const tx=txOfMonth(curMonth);
-  const exp=tx.filter(t=>t.type==="expense");
-  const incTotal=tx.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
-  const expTotal=exp.reduce((s,t)=>s+t.amount,0);
+  const exp=tx.filter(isSpend);   // 카드대금 제외 (지출 아님 · 잔액에서만 차감)
+  const incTotal=sumAmt(tx.filter(t=>t.type==="income"));
+  const expTotal=sumAmt(exp);
 
   if(exp.length===0){
     box.innerHTML='<section class="card"><h2>평가</h2><div class="empty">이번 달 지출 내역이 없습니다. 거래가 쌓이면 예측과 평가가 표시됩니다.</div></section>';
@@ -1221,7 +1272,7 @@ function renderEval(){
     cmts.push({tone:"info",t:`지출 1위는 <b>${esc(top[0])}</b> ${won(top[1])}원 — 전체의 ${pct}%`});
   }
   const pm=prevKey(curMonth);
-  const pmExp=state.transactions.filter(t=>t.type==="expense"&&t.date.slice(0,7)===pm);
+  const pmExp=state.transactions.filter(t=>isSpend(t)&&t.date.slice(0,7)===pm);
   const pmTotal=pmExp.reduce((s,t)=>s+t.amount,0);
   if(pmTotal>0){
     const diff=(expTotal-pmTotal)/pmTotal*100;
@@ -1328,7 +1379,7 @@ function fbcMonthSeq(){
 }
 function fbcTotals(cat){
   const map={};
-  state.transactions.forEach(t=>{ if(t.type==="expense"&&t.category===cat){ const k=t.date.slice(0,7); map[k]=(map[k]||0)+t.amount; } });
+  state.transactions.forEach(t=>{ if(isSpend(t)&&t.category===cat){ const k=t.date.slice(0,7); map[k]=(map[k]||0)+t.amount; } });
   return map;
 }
 function fbcCeil(v){
@@ -1346,9 +1397,9 @@ function fbcMan(v){
 function renderCatTrend(){
   const box=document.getElementById("catTrendBox");
   if(!box) return;
-  const cats=allCats().filter(c=>c!=="수입");
+  const cats=allCats().filter(c=>c!=="수입"&&c!==CARDPAY_CAT);   // 카드대금은 지출이 아니므로 제외
   if(!fbcCat || !cats.includes(fbcCat)){
-    const agg={}; state.transactions.forEach(t=>{ if(t.type==="expense"&&t.date.slice(0,7)===curMonth) agg[t.category]=(agg[t.category]||0)+t.amount; });
+    const agg={}; state.transactions.forEach(t=>{ if(isSpend(t)&&t.date.slice(0,7)===curMonth) agg[t.category]=(agg[t.category]||0)+t.amount; });
     const top=Object.entries(agg).sort((a,b)=>b[1]-a[1])[0];
     fbcCat=top?top[0]:(cats[0]||"");
   }
@@ -1427,10 +1478,11 @@ function renderSrcBar(){
   bar.innerHTML=opts.map(([v,l])=>`<button class="${v===curSrc?'on':''}" data-src="${v}">${l}</button>`).join("");
   bar.querySelectorAll("button").forEach(b=>b.onclick=()=>{curSrc=b.dataset.src;render();});
   const tx=txFiltered();
-  const out=tx.filter(t=>t.type==="expense").reduce((s,t)=>s+t.amount,0);
-  const inc=tx.filter(t=>t.type==="income").reduce((s,t)=>s+t.amount,0);
+  const out=sumAmt(tx.filter(isSpend));            // 카드대금 제외
+  const inc=sumAmt(tx.filter(t=>t.type==="income"));
+  const card=sumAmt(tx.filter(isCardPay));
   document.getElementById("srcMeta").textContent=
-    `${curSrc==="all"?"전체":curSrc} · ${tx.length}건 · 지출 ${won(out)}원${inc?` · 수입 ${won(inc)}원`:""}`;
+    `${curSrc==="all"?"전체":curSrc} · ${tx.length}건 · 지출 ${won(out)}원${inc?` · 수입 ${won(inc)}원`:""}${card?` · 카드대금 ${won(card)}원`:""}`;
 }
 function renderTable(){
   const tx=txFiltered();
